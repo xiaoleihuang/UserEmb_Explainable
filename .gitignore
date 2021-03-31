@@ -129,7 +129,7 @@ dmypy.json
 .pyre/
 
 # self-define
-/.idea
+/.idea/*
 **/.DS_Store
 /data/*
 /resources/*

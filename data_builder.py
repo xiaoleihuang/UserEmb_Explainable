@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from nltk.tokenize import word_tokenize
 from keras.preprocessing.text import Tokenizer
-from pymetamap import MetaMap
+from pandarallel import pandarallel
 
 
 def sigmoid(value):
@@ -98,12 +98,6 @@ def preprocess(doc, stopwords=None, min_len=None):
         return 'x'
     else:
         return ' '.join(doc)
-
-
-def process_concepts(entities):
-
-    # TODO
-    pass
 
 
 def format_time(time):
@@ -508,7 +502,6 @@ def process_diabetes(indir, odir):
             all_user_tokens.extend(result['docs'][-1]['text'].split())
             result['docs'][-1]['tags'] = result['tags']
             result['docs'][-1]['doc_id'] = str(did)
-            result['docs'][-1]['concepts'] = list()  # TODO, concepts from metamap
             did += 1
 
         # filter out empty patients
@@ -573,7 +566,6 @@ def process_mimic(indir, odir):
     :param odir:
     :return:
     """
-    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
     results = dict()
     # progressively load the note event
     notes = pd.read_csv(
@@ -583,6 +575,7 @@ def process_mimic(indir, odir):
     notes.CHARTDATE = pd.to_datetime(notes.CHARTDATE)
 
     # filter out none discharge summary
+    print('Filtering and Preprocessing Notes...')
     # similar to https://github.com/jamesmullenbach/caml-mimic/blob/master/notebooks/dataproc_mimic_III.ipynb
     # notes = notes[notes.CATEGORY == 'Discharge summary']  # extract all types of documents
     notes.SUBJECT_ID = notes.SUBJECT_ID.apply(lambda x: x.strip())
@@ -595,11 +588,16 @@ def process_mimic(indir, odir):
     counts = dict([item for item in counts.items() if item[1] > 2])
     notes = notes[notes.HADM_ID.isin(counts)]
     notes.fillna('x', inplace=True)
+    print('We have number of documents: ', len(notes))
     # preprocess the note documents, filter out documents less than 50 tokens
-    notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
+    # notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
+    # run parallel, consumes lots of memories for 15 GB / 48 workers.
+    pandarallel.initialize()
+    notes.TEXT = notes.TEXT.parallel_apply(lambda x: preprocess(x, min_len=50))
     notes = notes[notes.TEXT != 'x']
 
     # load patient table
+    print('Getting patient and admission information...')
     patient_set = set(notes.SUBJECT_ID)
     patients = pd.read_csv(
         indir + 'PATIENTS.csv', dtype=str,
@@ -624,6 +622,7 @@ def process_mimic(indir, odir):
     admits = dict(zip(admits.SUBJECT_ID, admits.ETHNICITY))
 
     # load icd codes
+    print('Converting ICD codes...')
     icd_encoder = dict()
     dfile = yaml.load(open('./resources/hcup_ccs_2015_definitions.yaml'), Loader=yaml.FullLoader)
     for tmp_key in dfile:
@@ -652,6 +651,7 @@ def process_mimic(indir, odir):
             dfcodes[code_id].append(icd_encoder.get(line[icd_idx].strip()))
 
     # loop through each note
+    print('Processing each row...')
     for index, row in notes.iterrows():
         uid = row['SUBJECT_ID'] + '-' + row['HADM_ID']
         if uid not in results:
@@ -671,20 +671,21 @@ def process_mimic(indir, odir):
                 'docs': list(),  # collect all patient notes
             }
 
-        # filter out empty records
-        if len(row['TEXT'].split()) < 10:
+        # filter out empty records with less than 40 tokens
+        if len(row['TEXT'].split()) < 50:
             continue
 
-        concepts = mm.extract_concepts([row['TEXT']],  word_sense_disambiguation=True)
-        results[uid]['docs'].append({
-            'doc_id': row['ROW_ID'],
-            'date': row['CHARTDATE'].strftime('%Y-%m-%d'),
-            'text': row['TEXT'],
-            'tags': dfcodes[uid],
-            'concepts': [],  # TODO
-        })
-        results[uid]['tags_set'].update(dfcodes[uid])
-        results[uid]['tags'].extend(dfcodes[uid])
+        try:
+            results[uid]['docs'].append({
+                'doc_id': row['ROW_ID'],
+                'date': row['CHARTDATE'].strftime('%Y-%m-%d'),
+                'text': row['TEXT'],
+                'tags': dfcodes[uid],
+            })
+            results[uid]['tags_set'].update(dfcodes[uid])
+            results[uid]['tags'].extend(dfcodes[uid])
+        except KeyError:
+            continue
 
     opath = os.path.join(odir, 'mimic-iii.json')
     with open(opath, 'w') as wfile:
@@ -707,10 +708,10 @@ if __name__ == '__main__':
     # process_amazon(amazon_indir, output_dir + 'amazon/')
 
     # diabetes
-    diabetes_indir = './data/raw_data/diabetes/all/'
-    if not os.path.exists(output_dir + 'diabetes/'):
-        os.mkdir(output_dir + 'diabetes/')
-    process_diabetes(diabetes_indir, output_dir + 'diabetes/')
+    # diabetes_indir = './data/raw_data/diabetes/all/'
+    # if not os.path.exists(output_dir + 'diabetes/'):
+    #     os.mkdir(output_dir + 'diabetes/')
+    # process_diabetes(diabetes_indir, output_dir + 'diabetes/')
 
     # mimic-iii
     mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'

@@ -15,8 +15,11 @@ import yaml
 import numpy as np
 import pandas as pd
 from nltk.tokenize import word_tokenize
+import nltk.data
+from pymetamap import MetaMap
 from keras.preprocessing.text import Tokenizer
 from pandarallel import pandarallel
+from tqdm import tqdm
 
 
 def sigmoid(value):
@@ -154,6 +157,73 @@ def build_tokenizer(dname, indir, odir):
         with open(opath, 'wb') as wfile:
             pickle.dump(tok, wfile)
         return tok
+
+
+def process_concepts(entities):
+    results = []
+    for entity in entities:
+        item = dict()
+        item['semtypes'] = entity.semtypes.lstrip('[').rstrip(']').split(',')
+        # define filter list
+        if 'qnco' in item['semtypes']:  # filter out Quantitative Concept: per year
+            continue
+        if 'tmco' in item['semtypes']:  # filter out Temporal Concept: day
+            continue
+        if 'hlca' in item['semtypes']:  # Health Care Activity: Hospital admission; Tapering - action;
+            continue
+        if 'idcn' in item['semtypes']:  # Idea or Concept: Presentation
+            continue
+        if 'hcro' in item['semtypes']:  # Health Care Related Organization: Accident and Emergency department
+            continue
+        if 'clna' in item['semtypes']:  # Clinical Attribute: History of present illness
+            continue
+        if 'ftcn' in item['semtypes']:  # Functional Concept: Negation, Extraocular; Due to
+            continue
+        if 'qlco' in item['semtypes']:  # Qualitative Concept: Started
+            continue
+        if 'fndg' in item['semtypes']:  # Finding: Present
+            continue
+        if 'acty' in item['semtypes']:  # Activity: Obscure; Assessed; Departure - action
+            continue
+        if 'mnob' in item['semtypes']:  # Manufactured Object: Machine; Beds
+            continue
+        if 'plnt' in item['semtypes']:  # Plant
+            continue
+        if 'podg' in item['semtypes']:  # Patient or Disabled Group: Patients
+            continue
+        if 'popg' in item['semtypes']:  # Population Group
+            continue
+        if 'prog' in item['semtypes']:  # Professional or Occupational Group: Physicians
+            continue
+        if 'pros' in item['semtypes']:  # Professional Society
+            continue
+        if 'elii' in item['semtypes']:  # Element, Ion, or Isotope: lead
+            continue
+        if 'anim' in item['semtypes']:  # Animal: Show
+            continue
+        if 'inpr' in item['semtypes']:  # Intellectual Product: Code; Telephone Number
+            continue
+        if 'orgf' in item['semtypes']:  # Organism Function: Movement; Expiration, function; Inspiration function
+            continue
+        if 'npop' in item['semtypes']:  # Natural Phenomenon or Process: Saturated
+            continue
+        if 'lang' in item['semtypes']:  # Language: Herero language
+            continue
+        if 'spco' in item['semtypes']:  # Spatial Concept: Scattered; Round shape
+            continue
+        if 'bpoc' in item['semtypes']:  # Body Part, Organ, or Organ Component: Eminence
+            continue
+
+        item['index'] = len(results)
+        item['mm'] = entity.mm
+        item['score'] = entity.score
+        item['preferred_name'] = entity.preferred_name
+        item['cui'] = entity.cui
+        item['trigger'] = entity.trigger.lstrip('[').rstrip(']').split(',')
+        item['pos_info'] = entity.pos_info
+        results.append(item)
+
+    return results
 
 
 def process_amazon(indir, odir):
@@ -422,6 +492,9 @@ def process_diabetes(indir, odir):
     opath = os.path.join(odir, 'diabetes.json')
     wfile = open(opath, 'w')
 
+    # load tokenizers and concept extractor
+    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
+
     # extract age information
     user_age = dict()
     with open('./resources/diabetes_age.csv') as dfile:
@@ -490,16 +563,68 @@ def process_diabetes(indir, odir):
                         continue
                 if 'VISIT DATE' in snippet[idx]:
                     continue
-                line = preprocess(line)
-                collection.append(line)
-            result['docs'][-1]['text'] = ' '.join(collection)
 
+                line = preprocess(line)
+                all_user_tokens.extend(line.split())
+                collection.append(line)
+
+            result['docs'][-1]['text'] = ' '.join(collection)
             # filter out empty records
             if len(result['docs'][-1]['text'].split()) < 10:
                 result['docs'].pop(-1)
                 continue
 
-            all_user_tokens.extend(result['docs'][-1]['text'].split())
+            concepts_collection = []
+            # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
+            # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
+            step_size = 5
+            steps = len(collection) // step_size
+
+            # reduce line length
+            # def partition(temp_l, n):
+            #     for i in range(0, len(temp_l), n):
+            #         yield ' '.join(temp_l[i:i + n])
+            #
+            # collection_len = len(collection)
+            # partition_size = 500
+            # for line_idx in range(len(collection)):
+            #     if len(collection[line_idx].split()) > partition_size:
+            #         collection.extend(list(partition(collection[line_idx].split(), partition_size)))
+            #     else:
+            #         collection.append(collection[line_idx])
+            # collection = collection[collection_len:]
+
+            if len(collection) % step_size != 0:
+                steps += 1
+            for step in range(steps):
+                try:
+                    concepts, error = mm.extract_concepts(
+                        collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
+                        unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                        no_nums=['all'], exclude_sts=[
+                            'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                            'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                            'anim',
+                        ],
+                    )
+                except IndexError:
+                    concepts, error = mm.extract_concepts(
+                        collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
+                        unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                        no_nums=['all'], exclude_sts=[
+                            'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                            'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                            'anim',
+                        ], prune=33,
+                    )
+                concepts_collection.extend(process_concepts(concepts))
+            # below implementation will cause insufficient memory error, even with 16G XMx
+            # results = [[]] * len(docs)
+            # concepts = mm.extract_concepts(docs, ids=list(range(len(docs))), word_sense_disambiguation=True)
+            # for concept in concepts:
+            #     results[int(concept.index)].append(concept)
+            result['docs'][-1]['concepts'] = concepts_collection
+
             result['docs'][-1]['tags'] = result['tags']
             result['docs'][-1]['doc_id'] = str(did)
             did += 1
@@ -567,6 +692,10 @@ def process_mimic(indir, odir):
     :return:
     """
     results = dict()
+    # load tokenizers and concept extractor
+    sent_tok = nltk.data.load('tokenizers/punkt/PY3/english.pickle')
+    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
+
     # progressively load the note event
     notes = pd.read_csv(
         indir + 'NOTEEVENTS.csv', dtype=str,
@@ -652,7 +781,7 @@ def process_mimic(indir, odir):
 
     # loop through each note
     print('Processing each row...')
-    for index, row in notes.iterrows():
+    for index, row in tqdm(notes.iterrows()):
         uid = row['SUBJECT_ID'] + '-' + row['HADM_ID']
         if uid not in results:
             u_age = (row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
@@ -687,6 +816,58 @@ def process_mimic(indir, odir):
         except KeyError:
             continue
 
+        # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
+        # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
+        collection = sent_tok.tokenize(row['TEXT'])
+        step_size = 5
+        steps = len(collection) // step_size
+        concepts_collection = []
+
+        # reduce line length
+        def partition(temp_l, n):
+            for i in range(0, len(temp_l), n):
+                yield ' '.join(temp_l[i:i + n])
+
+        collection_len = len(collection)
+        for line_idx in range(len(collection)):
+            if len(collection[line_idx].split()) > 1000:
+                collection.extend(list(partition(collection[line_idx].split(), 1000)))
+            else:
+                collection.append(collection[line_idx])
+        collection = collection[collection_len:]
+
+        if len(collection) % step_size != 0:
+            steps += 1
+        for step in range(steps):
+            try:
+                concepts, error = mm.extract_concepts(
+                    collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
+                    unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                    no_nums=['all'], exclude_sts=[
+                        'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                        'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                        'anim',
+                    ],
+                )
+            except IndexError:
+                concepts, error = mm.extract_concepts(
+                    collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
+                    unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                    no_nums=['all'], exclude_sts=[
+                        'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                        'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                        'anim',
+                    ], prune=33,
+                )
+            concepts_collection.extend(process_concepts(concepts))
+
+        results[uid]['docs'][-1]['concepts'] = concepts_collection
+        # below implementation will cause insuficient memory error, even with 16G XMx
+        # results = [[]] * len(docs)
+        # concepts = mm.extract_concepts(docs, ids=list(range(len(docs))), word_sense_disambiguation=True)
+        # for concept in concepts:
+        #     results[int(concept.index)].append(concept)
+
     opath = os.path.join(odir, 'mimic-iii.json')
     with open(opath, 'w') as wfile:
         for uid in results:
@@ -708,10 +889,10 @@ if __name__ == '__main__':
     # process_amazon(amazon_indir, output_dir + 'amazon/')
 
     # diabetes
-    # diabetes_indir = './data/raw_data/diabetes/all/'
-    # if not os.path.exists(output_dir + 'diabetes/'):
-    #     os.mkdir(output_dir + 'diabetes/')
-    # process_diabetes(diabetes_indir, output_dir + 'diabetes/')
+    diabetes_indir = './data/raw_data/diabetes/all/'
+    if not os.path.exists(output_dir + 'diabetes/'):
+        os.mkdir(output_dir + 'diabetes/')
+    process_diabetes(diabetes_indir, output_dir + 'diabetes/')
 
     # mimic-iii
     mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'

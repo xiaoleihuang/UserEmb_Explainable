@@ -12,14 +12,19 @@ import xmltodict
 import pickle
 import yaml
 from multiprocessing import Pool
+import sys
+import subprocess
+import tempfile
 
 import numpy as np
 import pandas as pd
 from nltk.tokenize import word_tokenize, sent_tokenize
+from pymetamap import Corpus, CorpusLite
 from pymetamap import MetaMap
+# from pymetamap import MetaMapLite
 from keras.preprocessing.text import Tokenizer
 from pandarallel import pandarallel
-from tqdm import tqdm
+# from tqdm import tqdm
 
 
 def sigmoid(value):
@@ -165,6 +170,270 @@ def build_tokenizer(dname, indir, odir):
         return tok
 
 
+# code adapt from https://github.com/AnthonyMRios/pymetamap/blob/master/pymetamap/SubprocessBackendLite.py
+def metamaplite_concepts(sentences=None, ids=None,
+                         restrict_to_sts=None, restrict_to_sources=None):
+    """ extract_concepts takes a list of sentences and ids(optional)
+        then returns a list of Concept objects extracted via
+        MetaMapLite.
+        Supported Options:
+            Restrict to Semantic Types --restrict_to_sts
+            Restrict to Sources --restrict_to_sources
+        For information about the available options visit
+        http://metamap.nlm.nih.gov/.
+        Note: If an error is encountered the process will be closed
+              and whatever was processed, if anything, will be
+              returned along with the error found.
+    """
+    metamap_home = '/data/xiaolei/public_mm_lite/'
+    if not sentences:
+        raise ValueError("You must either pass a list of sentences.")
+
+    input_file = tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix='.mmi')
+
+    if sentences is not None:
+        if ids is not None:
+            for identifier, sentence in zip(ids, sentences):
+                input_file.write('{0!r}|{1}\n'.format(identifier, sentence).encode('utf8'))
+        else:
+            for sentence in sentences:
+                input_file.write('{0!r}\n'.format(sentence).encode('utf8'))
+        input_file.flush()
+        input_file.close()
+
+    command = ["bash", os.path.join(metamap_home, "metamaplite.sh")]
+    if restrict_to_sts:
+        if isinstance(restrict_to_sts, str):
+            restrict_to_sts = [restrict_to_sts]
+        if len(restrict_to_sts) > 0:
+            command.append('--restrict_to_sts={}'.format(str(','.join(restrict_to_sts))))
+            # command.append(str(','.join(restrict_to_sts)))
+
+    if restrict_to_sources:
+        if isinstance(restrict_to_sources, str):
+            restrict_to_sources = [restrict_to_sources]
+        if len(restrict_to_sources) > 0:
+            command.append('--restrict_to_sources')
+            command.append(str(','.join(restrict_to_sources)))
+
+    if ids is not None:
+        command.append('--inputformat=sldiwi')
+
+    command.append(input_file.name)
+    command.append('--overwrite')
+    command.append('--indexdir={}data/ivf/2020AA/USAbase'.format(metamap_home))
+    command.append('--modelsdir={}data/models/'.format(metamap_home))
+    command.append('--specialtermsfile={}data/specialterms.txt'.format(metamap_home))
+    # command.append(output_file.name)
+
+    output_file_name, file_extension = os.path.splitext(input_file.name)
+    output_file_name += "." + "mmi"
+
+    output_file_name, file_extension = os.path.splitext(input_file.name)
+    output_file_name += "." + "mmi"
+
+    # output = str(output_file.read())
+    metamap_process = subprocess.Popen(command, stdout=subprocess.PIPE)
+    while metamap_process.poll() is None:
+        stdout = str(metamap_process.stdout.readline())
+        if 'ERROR' in stdout:
+            metamap_process.terminate()
+            print(stdout.rstrip())
+
+    # print("input file name: {0}".format(input_file.name))
+    output_file_name, file_extension = os.path.splitext(input_file.name)
+    output_file_name += "." + "mmi"
+    # print("output_file_name: {0}".format(output_file_name))
+    with open(output_file_name) as fd:
+        output = fd.read()
+    # output = str(output_file.read())
+    # print("output: {0}".format(output))
+    concepts = CorpusLite.load(output.splitlines())
+    return concepts
+
+
+# code adapt from https://github.com/AnthonyMRios/pymetamap/blob/master/pymetamap/SubprocessBackend.py
+def metamap_concepts(sentences=None,
+                     ids=None,
+                     composite_phrase=4,
+                     file_format='sldi',
+                     allow_acronym_variants=False,
+                     word_sense_disambiguation=False,
+                     allow_large_n=False,
+                     strict_model=False,
+                     relaxed_model=False,
+                     allow_overmatches=False,
+                     allow_concept_gaps=False,
+                     term_processing=False,
+                     no_derivational_variants=False,
+                     derivational_variants=False,
+                     ignore_word_order=False,
+                     unique_acronym_variants=False,
+                     prefer_multiple_concepts=False,
+                     ignore_stop_phrases=False,
+                     compute_all_mappings=False,
+                     prune=-1,
+                     mm_data_version=False,
+                     exclude_sources=None,
+                     restrict_to_sources=None,
+                     restrict_to_sts=None,
+                     exclude_sts=None,
+                     no_nums=None):
+    """ extract_concepts takes a list of sentences and ids(optional)
+        then returns a list of Concept objects extracted via
+        MetaMap.
+        Supported Options:
+            Composite Phrase -Q
+            Word Sense Disambiguation -y
+            use strict model -A
+            use relaxed model -C
+            allow large N -l
+            allow overmatches -o
+            allow concept gaps -g
+            term processing -z
+            No Derivational Variants -d
+            All Derivational Variants -D
+            Ignore Word Order -i
+            Allow Acronym Variants -a
+            Unique Acronym Variants -u
+            Prefer Multiple Concepts -Y
+            Ignore Stop Phrases -K
+            Compute All Mappings -b
+            MM Data Version -V
+            Exclude Sources -e
+            Restrict to Sources -R
+            Restrict to Semantic Types -J
+            Exclude Semantic Types -k
+            Suppress Numerical Concepts --no_nums
+        For information about the available options visit
+        http://metamap.nlm.nih.gov/.
+        Note: If an error is encountered the process will be closed
+              and whatever was processed, if anything, will be
+              returned along with the error found.
+    """
+    if no_nums is None:
+        no_nums = []
+    if exclude_sts is None:
+        exclude_sts = []
+    if restrict_to_sts is None:
+        restrict_to_sts = []
+    if restrict_to_sources is None:
+        restrict_to_sources = []
+    if allow_acronym_variants and unique_acronym_variants:
+        raise ValueError("You can't use both allow_acronym_variants and unique_acronym_variants.")
+    if not sentences:
+        raise ValueError("You must either pass a list of sentences.")
+    if file_format not in ['sldi', 'sldiID']:
+        raise ValueError("file_format must be either sldi or sldiID")
+
+    command = list()
+    command.append('metamap')
+    command.append('-N')
+    command.append('-Q')
+    command.append(str(composite_phrase))
+    if mm_data_version is not False:
+        if mm_data_version not in ['Base', 'USAbase', 'NLM']:
+            raise ValueError("mm_data_version must be Base, USAbase, or NLM.")
+        command.append('-V')
+        command.append(str(mm_data_version))
+    if word_sense_disambiguation:
+        command.append('-y')
+    if strict_model:
+        command.append('-A')
+    if prune != -1:
+        command.append('--prune')
+        command.append(str(prune))
+    if relaxed_model:
+        command.append('-C')
+    if allow_large_n:
+        command.append('-l')
+    if allow_overmatches:
+        command.append('-o')
+    if allow_concept_gaps:
+        command.append('-g')
+    if term_processing:
+        command.append('-z')
+    if no_derivational_variants:
+        command.append('-d')
+    if derivational_variants:
+        command.append('-D')
+    if ignore_word_order:
+        command.append('-i')
+    if allow_acronym_variants:
+        command.append('-a')
+    if unique_acronym_variants:
+        command.append('-u')
+    if prefer_multiple_concepts:
+        command.append('-Y')
+    if ignore_stop_phrases:
+        command.append('-K')
+    if compute_all_mappings:
+        command.append('-b')
+    if exclude_sources and len(exclude_sources) > 0:
+        command.append('-e')
+        command.append(str(','.join(exclude_sources)))
+    if restrict_to_sources and len(restrict_to_sources) > 0:
+        command.append('-R')
+        command.append(str(','.join(restrict_to_sources)))
+    if restrict_to_sts and len(restrict_to_sts) > 0:
+        command.append('-J')
+        command.append(str(','.join(restrict_to_sts)))
+    if exclude_sts and len(exclude_sts) > 0:
+        command.append('-k')
+        command.append(str(','.join(exclude_sts)))
+    if no_nums and len(no_nums) > 0:
+        command.append('--no_nums')
+        command.append(str(','.join(no_nums)))
+    if ids is not None or (file_format == 'sldiID' and sentences is None):
+        command.append('--sldiID')
+    else:
+        command.append('--sldi')
+
+    command.append('--silent')
+
+    output = None
+    if sentences is not None:
+        input_text = None
+        if ids is not None:
+            for identifier, sentence in zip(ids, sentences):
+                if input_text is None:
+                    input_text = '{0!r}|{1!r}\n'.format(identifier, sentence).encode('utf8')
+                else:
+                    input_text += '{0!r}|{1!r}\n'.format(identifier, sentence).encode('utf8')
+        else:
+            for sentence in sentences:
+                if input_text is None:
+                    input_text = '{0!r}\n'.format(sentence).encode('utf8')
+                else:
+                    input_text += '{0!r}\n'.format(sentence).encode('utf8')
+
+        input_command = list()
+        input_command.append('echo')
+        input_command.append('-e')
+        input_command.append(input_text)
+
+        input_process = subprocess.Popen(input_command, stdout=subprocess.PIPE)
+        metamap_process = subprocess.Popen(command, stdout=subprocess.PIPE, stdin=input_process.stdout)
+
+        output, error = metamap_process.communicate()
+        if sys.version_info[0] > 2:
+            if isinstance(output, bytes):
+                output = output.decode()
+
+        if metamap_process.returncode == 0:
+            output = output.split('\n')
+            info_line = 0
+            for idx in range(len(output)):
+                if len(output[idx].split('|')) > 1 and output[idx].split('|')[1] in ['MMI', 'AA', 'UA']:
+                    info_line = idx
+                    break
+            output = [item for item in output[info_line:] if len(item) > 3]
+            output = Corpus.load(output)
+        else:
+            return None
+    return output
+
+
 def process_concepts(entities):
     results = []
     for entity in entities:
@@ -218,6 +487,10 @@ def process_concepts(entities):
         if 'spco' in item['semtypes']:  # Spatial Concept: Scattered; Round shape
             continue
         if 'bpoc' in item['semtypes']:  # Body Part, Organ, or Organ Component: Eminence
+            continue
+        if 'phsf' in item['semtypes']:  # Physiologic Function: Respiration
+            continue
+        if 'clas' in item['semtypes']:  # Classification: Trial Phase
             continue
 
         item['index'] = len(results)
@@ -499,7 +772,7 @@ def process_diabetes(indir, odir):
     wfile = open(opath, 'w')
 
     # load tokenizers and concept extractor
-    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
+    # mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
 
     # extract age information
     user_age = dict()
@@ -592,13 +865,14 @@ def process_diabetes(indir, odir):
                 steps += 1
             for step in range(steps):
                 try:
-                    concepts, error = mm.extract_concepts(
+                    # concepts, error = mm.extract_concepts(
+                    concepts = metamap_concepts(
                         collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
                         unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
                         no_nums=['all'], exclude_sts=[
                             'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
                             'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                            'anim',
+                            'anim', 'inpr'
                         ],
                     )
                     concepts_collection.extend(process_concepts(concepts))
@@ -620,14 +894,15 @@ def process_diabetes(indir, odir):
                             tmp_steps += 1
 
                         for tmp_step in range(tmp_steps):
-                            concepts, error = mm.extract_concepts(
+                            # concepts, error = mm.extract_concepts(
+                            concepts = metamap_concepts(
                                 tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
                                 word_sense_disambiguation=True,
                                 unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
                                 no_nums=['all'], exclude_sts=[
                                     'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro',
                                     'clna', 'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog',
-                                    'pros', 'elii', 'anim',
+                                    'pros', 'elii', 'anim', 'inpr'
                                 ], prune=33,
                             )
                             concepts_collection.extend(process_concepts(concepts))
@@ -712,20 +987,29 @@ def get_concept_thread(input_text):
 
     concepts_collection = []
     mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
+    # mm = MetaMapLite.get_instance('/data/xiaolei/public_mm_lite/')
 
     for step in range(steps):
         step_collection = collection[step * step_size: (step + 1) * step_size]
         try:
+            # concepts = metamap_concepts(
             concepts, error = mm.extract_concepts(
-                step_collection, word_sense_disambiguation=True,
-                unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
-                no_nums=['all'], exclude_sts=[
+                sentences=step_collection,
+                word_sense_disambiguation=True,
+                unique_acronym_variants=True,
+                ignore_stop_phrases=True,
+                no_derivational_variants=True,
+                no_nums=['all'],
+                exclude_sts=[
                     'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
                     'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                    'anim',
+                    'anim', 'inpr'
                 ],
+                # for metamap lite only
+                # restrict_to_sts=[],
             )
-            concepts_collection.extend(process_concepts(concepts))
+            if not concepts:
+                concepts_collection.extend(process_concepts(concepts))
         except IndexError:
             try:
                 tmp_collection = step_collection
@@ -743,17 +1027,22 @@ def get_concept_thread(input_text):
                     tmp_steps += 1
 
                 for tmp_step in range(tmp_steps):
+                    # concepts = metamap_concepts(
                     concepts, error = mm.extract_concepts(
-                        tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
+                        sentences=tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
                         word_sense_disambiguation=True,
-                        unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                        unique_acronym_variants=True,
+                        ignore_stop_phrases=True, no_derivational_variants=True,
                         no_nums=['all'], exclude_sts=[
                             'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
                             'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                            'anim',
+                            'anim', 'inpr'
                         ], prune=33,
+                        # for metamap lite only
+                        # restrict_to_sts=[],
                     )
-                    concepts_collection.extend(process_concepts(concepts))
+                    if concepts:
+                        concepts_collection.extend(process_concepts(concepts))
             except IndexError:
                 pass
 
@@ -763,25 +1052,20 @@ def get_concept_thread(input_text):
 def extract_concepts(notes_df, save_path):
     texts = list(notes_df.TEXT.iteritems())
     num_thread = os.cpu_count()
-    batch_size = num_thread * 30
-    steps = len(texts) // batch_size
-    if len(texts) % batch_size != 0:
-        steps += 1
     pool = Pool(num_thread)
     note_concepts = dict()
 
     print('Extracting Concepts ...')
-    for _ in tqdm(range(steps)):
-        results = pool.map(get_concept_thread, texts)
-        if len(results) == 0:
-            continue
+    results = pool.map(get_concept_thread, texts)
+    if len(results) == 0:
+        return
 
-        for entity in results:
-            if len(entity['concepts']) == 0:
-                continue
-            if entity['ROW_ID'] not in note_concepts:
-                note_concepts[entity['ROW_ID']] = []
-            note_concepts[entity['ROW_ID']].extend(entity['concepts'])
+    for entity in results:
+        if len(entity['concepts']) == 0:
+            continue
+        if entity['ROW_ID'] not in note_concepts:
+            note_concepts[entity['ROW_ID']] = []
+        note_concepts[entity['ROW_ID']].extend(entity['concepts'])
 
     with open(save_path, 'wb') as wfile:
         pickle.dump(note_concepts, wfile)
@@ -824,8 +1108,8 @@ def process_mimic(indir, odir):
             continue
 
         u_age = (
-            row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
-        ).total_seconds() / 3600 / 24 / 365
+                        row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
+                ).total_seconds() / 3600 / 24 / 365
 
         patients[row['SUBJECT_ID']].append(u_age)
 
@@ -984,4 +1268,4 @@ if __name__ == '__main__':
     mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'
     if not os.path.exists(output_dir + 'mimic-iii/'):
         os.mkdir(output_dir + 'mimic-iii/')
-    process_mimic(mimic_indir, output_dir + 'mimic-iii/')
+    process_mimic(mimic_indir, output_dir + 'mimic-iii/')  # TODO

@@ -11,11 +11,11 @@ from dateutil.parser import parse
 import xmltodict
 import pickle
 import yaml
+from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
-from nltk.tokenize import word_tokenize
-import nltk.data
+from nltk.tokenize import word_tokenize, sent_tokenize
 from pymetamap import MetaMap
 from keras.preprocessing.text import Tokenizer
 from pandarallel import pandarallel
@@ -43,6 +43,12 @@ def rank_bid(review_count, score, max_count, base):
         base: the score base, 10 for movie, 5 for yelp and amazon
     """
     return sigmoid(review_count / max_count) + sigmoid(score / base)
+
+
+# reduce line length
+def partition(temp_l, n):
+    for i in range(0, len(temp_l), n):
+        yield ' '.join(temp_l[i:i + n])
 
 
 def preprocess(doc, stopwords=None, min_len=None):
@@ -215,12 +221,12 @@ def process_concepts(entities):
             continue
 
         item['index'] = len(results)
-        item['mm'] = entity.mm
+        # item['mm'] = entity.mm
         item['score'] = entity.score
         item['preferred_name'] = entity.preferred_name
         item['cui'] = entity.cui
-        item['trigger'] = entity.trigger.lstrip('[').rstrip(']').split(',')
-        item['pos_info'] = entity.pos_info
+        # item['trigger'] = entity.trigger.lstrip('[').rstrip(']').split(',')
+        # item['pos_info'] = entity.pos_info
         results.append(item)
 
     return results
@@ -568,11 +574,12 @@ def process_diabetes(indir, odir):
                 all_user_tokens.extend(line.split())
                 collection.append(line)
 
-            result['docs'][-1]['text'] = ' '.join(collection)
+            doc_text = ' '.join(collection)
             # filter out empty records
-            if len(result['docs'][-1]['text'].split()) < 10:
+            if len(doc_text.split()) < 10:
                 result['docs'].pop(-1)
                 continue
+            result['docs'][-1]['text'] = doc_text
 
             concepts_collection = []
             # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
@@ -581,19 +588,6 @@ def process_diabetes(indir, odir):
             steps = len(collection) // step_size
 
             # reduce line length
-            # def partition(temp_l, n):
-            #     for i in range(0, len(temp_l), n):
-            #         yield ' '.join(temp_l[i:i + n])
-            #
-            # collection_len = len(collection)
-            # partition_size = 500
-            # for line_idx in range(len(collection)):
-            #     if len(collection[line_idx].split()) > partition_size:
-            #         collection.extend(list(partition(collection[line_idx].split(), partition_size)))
-            #     else:
-            #         collection.append(collection[line_idx])
-            # collection = collection[collection_len:]
-
             if len(collection) % step_size != 0:
                 steps += 1
             for step in range(steps):
@@ -607,17 +601,39 @@ def process_diabetes(indir, odir):
                             'anim',
                         ],
                     )
+                    concepts_collection.extend(process_concepts(concepts))
                 except IndexError:
-                    concepts, error = mm.extract_concepts(
-                        collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
-                        unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
-                        no_nums=['all'], exclude_sts=[
-                            'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
-                            'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                            'anim',
-                        ], prune=33,
-                    )
-                concepts_collection.extend(process_concepts(concepts))
+                    try:
+                        tmp_collection = collection[step * step_size: (step + 1) * step_size]
+                        partition_size = 100
+                        collection_len = len(tmp_collection)
+                        for line_idx in range(len(tmp_collection)):
+                            if len(tmp_collection[line_idx].split()) > partition_size:
+                                tmp_collection.extend(
+                                    list(partition(tmp_collection[line_idx].split(), partition_size)))
+                            else:
+                                tmp_collection.append(tmp_collection[line_idx])
+                        tmp_collection = tmp_collection[collection_len:]
+
+                        tmp_steps = len(tmp_collection) // step_size
+                        if len(tmp_collection) % step_size != 0:
+                            tmp_steps += 1
+
+                        for tmp_step in range(tmp_steps):
+                            concepts, error = mm.extract_concepts(
+                                tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
+                                word_sense_disambiguation=True,
+                                unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                                no_nums=['all'], exclude_sts=[
+                                    'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro',
+                                    'clna', 'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog',
+                                    'pros', 'elii', 'anim',
+                                ], prune=33,
+                            )
+                            concepts_collection.extend(process_concepts(concepts))
+                    except IndexError:
+                        continue
+
             # below implementation will cause insufficient memory error, even with 16G XMx
             # results = [[]] * len(docs)
             # concepts = mm.extract_concepts(docs, ids=list(range(len(docs))), word_sense_disambiguation=True)
@@ -684,6 +700,93 @@ def ethnicity_encode_mimic(ethnicity):
     return e_map[ethnicity] if ethnicity in e_map else e_map['OTHER']
 
 
+def get_concept_thread(input_text):
+    # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
+    # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
+    row_id, input_text = input_text
+    collection = sent_tokenize(input_text)
+    step_size = 5
+    steps = len(collection) // step_size
+    if len(collection) % step_size != 0:
+        steps += 1
+
+    concepts_collection = []
+    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
+
+    for step in range(steps):
+        step_collection = collection[step * step_size: (step + 1) * step_size]
+        try:
+            concepts, error = mm.extract_concepts(
+                step_collection, word_sense_disambiguation=True,
+                unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                no_nums=['all'], exclude_sts=[
+                    'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                    'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                    'anim',
+                ],
+            )
+            concepts_collection.extend(process_concepts(concepts))
+        except IndexError:
+            try:
+                tmp_collection = step_collection
+                partition_size = 60
+                collection_len = len(tmp_collection)
+                for line_idx in range(len(tmp_collection)):
+                    if len(tmp_collection[line_idx].split()) > partition_size:
+                        tmp_collection.extend(list(partition(tmp_collection[line_idx].split(), partition_size)))
+                    else:
+                        tmp_collection.append(tmp_collection[line_idx])
+                tmp_collection = tmp_collection[collection_len:]
+
+                tmp_steps = len(tmp_collection) // step_size
+                if len(tmp_collection) % step_size != 0:
+                    tmp_steps += 1
+
+                for tmp_step in range(tmp_steps):
+                    concepts, error = mm.extract_concepts(
+                        tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
+                        word_sense_disambiguation=True,
+                        unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                        no_nums=['all'], exclude_sts=[
+                            'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                            'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                            'anim',
+                        ], prune=33,
+                    )
+                    concepts_collection.extend(process_concepts(concepts))
+            except IndexError:
+                pass
+
+    return {'ROW_ID': row_id, 'concepts': concepts_collection}
+
+
+def extract_concepts(notes_df, save_path):
+    texts = list(notes_df.TEXT.iteritems())
+    num_thread = os.cpu_count()
+    batch_size = num_thread * 30
+    steps = len(texts) // batch_size
+    if len(texts) % batch_size != 0:
+        steps += 1
+    pool = Pool(num_thread)
+    note_concepts = dict()
+
+    print('Extracting Concepts ...')
+    for _ in tqdm(range(steps)):
+        results = pool.map(get_concept_thread, texts)
+        if len(results) == 0:
+            continue
+
+        for entity in results:
+            if len(entity['concepts']) == 0:
+                continue
+            if entity['ROW_ID'] not in note_concepts:
+                note_concepts[entity['ROW_ID']] = []
+            note_concepts[entity['ROW_ID']].extend(entity['concepts'])
+
+    with open(save_path, 'wb') as wfile:
+        pickle.dump(note_concepts, wfile)
+
+
 def process_mimic(indir, odir):
     """
 
@@ -692,38 +795,13 @@ def process_mimic(indir, odir):
     :return:
     """
     results = dict()
-    # load tokenizers and concept extractor
-    sent_tok = nltk.data.load('tokenizers/punkt/PY3/english.pickle')
-    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
-
     # progressively load the note event
     notes = pd.read_csv(
-        indir + 'NOTEEVENTS.csv', dtype=str,
+        indir + 'NOTEEVENTS.csv', dtype=str, index_col='ROW_ID',
         usecols=['ROW_ID', 'SUBJECT_ID', 'HADM_ID', 'CHARTDATE', 'CATEGORY', 'TEXT']
     )
     notes.CHARTDATE = pd.to_datetime(notes.CHARTDATE)
-
-    # filter out none discharge summary
-    print('Filtering and Preprocessing Notes...')
-    # similar to https://github.com/jamesmullenbach/caml-mimic/blob/master/notebooks/dataproc_mimic_III.ipynb
-    # notes = notes[notes.CATEGORY == 'Discharge summary']  # extract all types of documents
     notes.SUBJECT_ID = notes.SUBJECT_ID.apply(lambda x: x.strip())
-    # filter out patients who have less than two notes
-    patient_counts = Counter(notes.SUBJECT_ID)
-    patient_counts = set([item[0] for item in patient_counts.items()])
-    notes = notes[notes.SUBJECT_ID.isin(patient_counts)]
-    # filter out patients whoever generates less than 3 notes per stay
-    counts = Counter(notes.HADM_ID)
-    counts = dict([item for item in counts.items() if item[1] > 2])
-    notes = notes[notes.HADM_ID.isin(counts)]
-    notes.fillna('x', inplace=True)
-    print('We have number of documents: ', len(notes))
-    # preprocess the note documents, filter out documents less than 50 tokens
-    # notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
-    # run parallel, consumes lots of memories for 15 GB / 48 workers.
-    pandarallel.initialize()
-    notes.TEXT = notes.TEXT.parallel_apply(lambda x: preprocess(x, min_len=50))
-    notes = notes[notes.TEXT != 'x']
 
     # load patient table
     print('Getting patient and admission information...')
@@ -736,8 +814,60 @@ def process_mimic(indir, odir):
     patients = patients[patients.SUBJECT_ID.isin(patient_set)]
     patients.DOB = pd.to_datetime(patients.DOB)
     patients.fillna('x', inplace=True)
+    patients = patients[patients.DOB != 'x']
     # convert to a dictionary for fast search, the first value is id, the 2nd value is the timestamp
     patients = dict((z[0], list(z[1:])) for z in zip(patients.SUBJECT_ID, patients.GENDER, patients.DOB))
+
+    # get age of patients at the time of admission
+    for index, row in notes.iterrows():
+        if row['SUBJECT_ID'] not in patients:
+            continue
+
+        u_age = (
+            row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
+        ).total_seconds() / 3600 / 24 / 365
+
+        patients[row['SUBJECT_ID']].append(u_age)
+
+        if u_age < 18:
+            del patients[row['SUBJECT_ID']]
+
+    print('Filtering and Preprocessing Notes...')
+    # filter out notes by the patients age
+    notes = notes[notes.SUBJECT_ID.isin(set(list(patients.keys())))]
+
+    # only limit to the discharge summary
+    # similar to https://github.com/jamesmullenbach/caml-mimic/blob/master/notebooks/dataproc_mimic_III.ipynb
+    notes = notes[notes.CATEGORY == 'Discharge summary']
+    # remove some types of documents
+    # notes = notes[notes.CATEGORY.isin([
+    #     'Nursing/other', 'Radiology', 'Nursing', 'ECG', 'Physician ',
+    #     'Discharge summary', 'Echo', 'Respiratory ',
+    # ])]
+    # filter out patients who have less than two notes
+    # patient_counts = Counter(notes.SUBJECT_ID)
+    # patient_counts = set([item[0] for item in patient_counts.items() if item[-1] >= 2])
+    # notes = notes[notes.SUBJECT_ID.isin(patient_counts)]
+    # filter out patients whoever generates less than 2 notes per stay
+    # counts = Counter(notes.HADM_ID)
+    # counts = dict([item for item in counts.items() if item[1] >= 2])
+    # notes = notes[notes.HADM_ID.isin(counts)]
+
+    # preprocess the note documents, filter out documents less than 50 tokens
+    # notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
+    # run parallel, consumes lots of memories for 15 GB / 48 workers.
+    pandarallel.initialize()
+    notes.TEXT = notes.TEXT.parallel_apply(lambda x: preprocess(x, min_len=50))
+    notes.fillna('x', inplace=True)
+    notes = notes[notes.TEXT != 'x']
+    print('We have number of documents: ', len(notes))
+
+    # process the patients again
+    patient_set = set(notes.SUBJECT_ID)
+    for pid in list(patients.keys()):
+        if pid not in patient_set:
+            del patients[pid]
+    print('We have number of patients: ', len(patients))
 
     # get admission table, aim for the ethnicity information
     admits = pd.read_csv(
@@ -779,20 +909,21 @@ def process_mimic(indir, odir):
                 dfcodes[code_id] = list()
             dfcodes[code_id].append(icd_encoder.get(line[icd_idx].strip()))
 
+    # extract concepts from the notes
+    notes_concepts_path = indir + 'NOTEEVENTS_concepts.pkl'
+    if not os.path.exists(notes_concepts_path):
+        extract_concepts(notes, notes_concepts_path)
+    notes_concepts = pickle.load(open(notes_concepts_path, 'rb'))
+
     # loop through each note
     print('Processing each row...')
-    for index, row in tqdm(notes.iterrows()):
+    for index, row in notes.iterrows():
         uid = row['SUBJECT_ID'] + '-' + row['HADM_ID']
         if uid not in results:
-            u_age = (row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
-                     ).total_seconds() / 3600 / 24 / 365
-            if u_age < 18:  # filter out patients younger than 18
-                continue
-
             results[uid] = {
                 'uid': uid,
                 # calculate from the current stay and patient's DOB
-                'age': u_age,
+                'age': patients[row['SUBJECT_ID']][2],  # third value is the age
                 'gender': patients[row['SUBJECT_ID']][0],  # first value is the gender
                 'ethnicity': admits[row['SUBJECT_ID']],  # ethnicity
                 'tags_set': set(),  # convert to list in the end, unique tags
@@ -816,53 +947,8 @@ def process_mimic(indir, odir):
         except KeyError:
             continue
 
-        # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
-        # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
-        collection = sent_tok.tokenize(row['TEXT'])
-        step_size = 5
-        steps = len(collection) // step_size
-        concepts_collection = []
-
-        # reduce line length
-        def partition(temp_l, n):
-            for i in range(0, len(temp_l), n):
-                yield ' '.join(temp_l[i:i + n])
-
-        collection_len = len(collection)
-        for line_idx in range(len(collection)):
-            if len(collection[line_idx].split()) > 1000:
-                collection.extend(list(partition(collection[line_idx].split(), 1000)))
-            else:
-                collection.append(collection[line_idx])
-        collection = collection[collection_len:]
-
-        if len(collection) % step_size != 0:
-            steps += 1
-        for step in range(steps):
-            try:
-                concepts, error = mm.extract_concepts(
-                    collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
-                    unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
-                    no_nums=['all'], exclude_sts=[
-                        'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
-                        'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                        'anim',
-                    ],
-                )
-            except IndexError:
-                concepts, error = mm.extract_concepts(
-                    collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
-                    unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
-                    no_nums=['all'], exclude_sts=[
-                        'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
-                        'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                        'anim',
-                    ], prune=33,
-                )
-            concepts_collection.extend(process_concepts(concepts))
-
-        results[uid]['docs'][-1]['concepts'] = concepts_collection
-        # below implementation will cause insuficient memory error, even with 16G XMx
+        results[uid]['docs'][-1]['concepts'] = notes_concepts[row['ROW_ID']]
+        # below implementation will cause insufficient memory error, even with 16G XMx
         # results = [[]] * len(docs)
         # concepts = mm.extract_concepts(docs, ids=list(range(len(docs))), word_sense_disambiguation=True)
         # for concept in concepts:
@@ -889,10 +975,10 @@ if __name__ == '__main__':
     # process_amazon(amazon_indir, output_dir + 'amazon/')
 
     # diabetes
-    diabetes_indir = './data/raw_data/diabetes/all/'
-    if not os.path.exists(output_dir + 'diabetes/'):
-        os.mkdir(output_dir + 'diabetes/')
-    process_diabetes(diabetes_indir, output_dir + 'diabetes/')
+    # diabetes_indir = './data/raw_data/diabetes/all/'
+    # if not os.path.exists(output_dir + 'diabetes/'):
+    #     os.mkdir(output_dir + 'diabetes/')
+    # process_diabetes(diabetes_indir, output_dir + 'diabetes/')
 
     # mimic-iii
     mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'

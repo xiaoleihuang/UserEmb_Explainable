@@ -7,7 +7,7 @@ from collections import Counter
 import numpy as np
 
 
-def data_stats(corpus_path, opath=None):
+def data_stats(corpus_path, opath):
     results = dict()
     # document info
     results['num_doc'] = 0
@@ -29,6 +29,14 @@ def data_stats(corpus_path, opath=None):
     results['num_unique_tag'] = 0
     results['num_tag'] = 0
     results['tag_stats'] = []
+
+    # concept info
+    concepts = dict()
+    concepts['num_concept'] = 0
+    concepts['num_unique_concept'] = 0
+    concepts['num_unique_concept_type'] = 0
+    concepts['concept_type_stats'] = []
+    concepts['concept_token_stats'] = []
 
     with open(corpus_path) as dfile:
         for line in dfile:
@@ -60,6 +68,17 @@ def data_stats(corpus_path, opath=None):
                 if len(tokens) < results['min_token_per_doc']:
                     results['min_token_per_doc'] = len(tokens)
 
+                for concept in doc_entity['concepts']:
+                    concepts['num_concept'] += 1
+                    concepts['concept_token_stats'].append(concept['preferred_name'])
+                    concepts['concept_type_stats'].append(concept['semtypes'])
+
+    concepts['num_unique_concept'] = len(set(concepts['concept_token_stats']))
+    concepts['num_unique_concept_type'] = len(set(concepts['concept_type_stats']))
+    concepts['concept_token_stats'] = Counter(concepts['concept_token_stats']).most_common()
+    concepts['concept_type_stats'] = Counter(concepts['concept_type_stats']).most_common()
+    json.dump(concepts, open(os.path.splitext(opath)[0] + '_concept.json', 'w'), indent=4)
+
     results['ratio_male'] /= results['num_user']
     results['ratio_male'] = round(results['ratio_male'], 2)
     results['ratio_female'] /= results['num_user']
@@ -86,8 +105,7 @@ def data_stats(corpus_path, opath=None):
     results['tag_stats'] = Counter(results['tag_stats']).most_common()
     results['num_unique_tag'] = len(results['tag_stats'])
 
-    if opath:
-        json.dump(results, open(opath, 'w'), indent=4)
+    json.dump(results, open(opath, 'w'), indent=4)
 
 
 if __name__ == '__main__':

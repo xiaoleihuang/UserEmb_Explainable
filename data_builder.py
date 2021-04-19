@@ -493,7 +493,7 @@ def process_concepts(entities):
         if 'clas' in item['semtypes']:  # Classification: Trial Phase
             continue
 
-        item['index'] = len(results)
+        # item['index'] = len(results)
         # item['mm'] = entity.mm
         item['score'] = entity.score
         item['preferred_name'] = entity.preferred_name

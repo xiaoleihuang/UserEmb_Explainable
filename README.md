@@ -28,7 +28,7 @@ This will ensure you follow basic ethic rules to use the datasets. The datasets 
 
 * Download and follow instructions in the [MetaMap](https://metamap.nlm.nih.gov/MetaMap.shtml) to setup MetaMap.
     * Follow the instructions to download both data (dictionaries) and metamap toolkit.
-    * If you have not installed Java, please install and following the [JAVA link] (https://www.oracle.com/java/technologies/javase/javase-jdk8-downloads.html).
+    * If you have not installed Java, please install and following the [JAVA link](https://www.oracle.com/java/technologies/javase/javase-jdk8-downloads.html).
     * Note that our code supports both MetaMap and MetaMap-lite (faster version), but you have to change by yourself in `data_builder.py`.
 * Python MetaMap Interface
     * You will install [PyMetaMap toolkit](https://github.com/AnthonyMRios/pymetamap).

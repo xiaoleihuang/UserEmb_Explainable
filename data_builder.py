@@ -24,7 +24,7 @@ from pymetamap import MetaMap
 # from pymetamap import MetaMapLite
 from keras.preprocessing.text import Tokenizer
 from pandarallel import pandarallel
-# from tqdm import tqdm
+from tqdm import tqdm
 
 
 def sigmoid(value):
@@ -1049,7 +1049,27 @@ def get_concept_thread(input_text):
     return {'ROW_ID': row_id, 'concepts': concepts_collection}
 
 
-def extract_concepts(notes_df, save_path):
+def extract_concepts_sequential(notes_df, save_path):
+    texts = list(notes_df.TEXT.iteritems())
+    note_concepts = dict()
+
+    print('Extracting Concepts ...')
+    for idx in tqdm(range(len(texts))):
+        results = get_concept_thread(texts[idx])
+        if not results or len(results) == 0:
+            continue
+        if len(results['concepts']) == 0:
+            continue
+
+        if results['ROW_ID'] not in note_concepts:
+            note_concepts[results['ROW_ID']] = []
+        note_concepts[results['ROW_ID']].extend(results['concepts'])
+
+    with open(save_path, 'wb') as wfile:
+        pickle.dump(note_concepts, wfile)
+
+
+def extract_concepts_parallel(notes_df, save_path):
     texts = list(notes_df.TEXT.iteritems())
     num_thread = os.cpu_count()
     pool = Pool(num_thread)
@@ -1108,8 +1128,8 @@ def process_mimic(indir, odir):
             continue
 
         u_age = (
-                row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
-        ).total_seconds() / 3600 / 24 / 365
+                        row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
+                ).total_seconds() / 3600 / 24 / 365
 
         patients[row['SUBJECT_ID']].append(u_age)
 
@@ -1136,15 +1156,6 @@ def process_mimic(indir, odir):
     # counts = Counter(notes.HADM_ID)
     # counts = dict([item for item in counts.items() if item[1] >= 2])
     # notes = notes[notes.HADM_ID.isin(counts)]
-
-    # preprocess the note documents, filter out documents less than 50 tokens
-    # notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
-    # run parallel, consumes lots of memories for 15 GB / 48 workers.
-    pandarallel.initialize()
-    notes.TEXT = notes.TEXT.parallel_apply(lambda x: preprocess(x, min_len=50))
-    notes.fillna('x', inplace=True)
-    notes = notes[notes.TEXT != 'x']
-    print('We have number of documents: ', len(notes))
 
     # process the patients again
     patient_set = set(notes.SUBJECT_ID)
@@ -1196,8 +1207,17 @@ def process_mimic(indir, odir):
     # extract concepts from the notes
     notes_concepts_path = indir + 'NOTEEVENTS_concepts.pkl'
     if not os.path.exists(notes_concepts_path):
-        extract_concepts(notes, notes_concepts_path)
+        extract_concepts_sequential(notes, notes_concepts_path)
     notes_concepts = pickle.load(open(notes_concepts_path, 'rb'))
+
+    # preprocess the note documents, filter out documents less than 50 tokens
+    # notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
+    # run parallel, consumes lots of memories for 15 GB / 48 workers.
+    pandarallel.initialize()
+    notes.TEXT = notes.TEXT.parallel_apply(lambda x: preprocess(x, min_len=50))
+    notes.fillna('x', inplace=True)
+    notes = notes[notes.TEXT != 'x']
+    print('We have number of documents: ', len(notes))
 
     # loop through each note
     print('Processing each row...')

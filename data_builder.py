@@ -1108,8 +1108,8 @@ def process_mimic(indir, odir):
             continue
 
         u_age = (
-                        row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
-                ).total_seconds() / 3600 / 24 / 365
+                row['CHARTDATE'].to_pydatetime() - patients[row['SUBJECT_ID']][1].to_pydatetime()
+        ).total_seconds() / 3600 / 24 / 365
 
         patients[row['SUBJECT_ID']].append(u_age)
 

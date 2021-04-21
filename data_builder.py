@@ -112,6 +112,9 @@ def preprocess(doc, stopwords=None, min_len=None):
     doc = re.sub(r'_+', ' ', doc)
     doc = re.sub(r',+', ',', doc)
 
+    # special character
+    doc = doc.replace('w/', '')
+
     doc = doc.lower()
     doc = [item.strip() for item in word_tokenize(doc)
            if len(item.strip()) > 1 and item not in stopwords
@@ -784,6 +787,155 @@ def process_amazon(indir, odir):
         wfile.write(json.dumps(product_idx_encoder))
 
 
+def process_diabetes_thread(finfo):
+    fname, opath, user_age, indir = finfo
+    print('Working on: ', fname)
+    result = dict()
+    result['uid'] = fname.split('.')[0]
+    all_user_tokens = []
+    fpath = os.path.join(indir, fname)
+
+    # convert the xml to json dictionary
+    dfile = xmltodict.parse(open(fpath).read())
+
+    # read the tags of the patient
+    result['tags'] = []
+    result['tags_set'] = set()
+    for tag in dfile['PatientMatching']['TAGS']:
+        # filter out some tags that have low Kappa-agreement < 50%
+        if tag in ['ENGLISH', 'MAKES-DECISIONS', 'ADVANCED-CAD']:
+            continue
+
+        if dfile['PatientMatching']['TAGS'][tag]['@met'] == 'met':
+            result['tags'].append(tag.lower())
+            result['tags_set'].add(tag.lower())
+    result['tags_set'] = list(result['tags_set'])
+
+    # parse every diagnosis report
+    result['docs'] = []
+    separator = '*' * 100  # each report was separated by 100 stars
+    did = 0  # doc id
+
+    for snippet in tqdm(dfile['PatientMatching']['TEXT'].split(separator)):
+        result['docs'].append(dict())
+        snippet = snippet.strip()
+
+        if len(snippet) < 10:
+            continue
+        # extract date
+        try:
+            snippet = re.split('^Record [d|D]ate: ([^\s]+)*', snippet)[1:]
+            result['docs'][-1]['date'] = snippet[0]
+        except IOError or OSError:
+            print(snippet)
+        snippet = snippet[1]
+
+        # remove the footnote
+        snippet = snippet.split('___________________________________')[0].strip('-').strip()
+        snippet = snippet.split('\n')
+
+        collection = []
+        for idx in range(len(snippet)):
+            line = ' '.join([token.strip() for token in snippet[idx].split() if len(token.strip()) > 0])
+            if len(line) < 5:
+                continue
+            if idx < 5:
+                if len(line) < 30:
+                    continue
+            if 'VISIT DATE' in snippet[idx]:
+                continue
+
+            line = preprocess(line)
+            all_user_tokens.extend(line.split())
+            collection.append(line)
+
+        doc_text = ' '.join(collection)
+        # filter out empty records
+        if len(doc_text.split()) < 10:
+            result['docs'].pop(-1)
+            continue
+        result['docs'][-1]['text'] = doc_text
+
+        concepts_collection = []
+        # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
+        # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
+        step_size = 5
+        steps = len(collection) // step_size
+
+        # reduce line length
+        if len(collection) % step_size != 0:
+            steps += 1
+        for step in range(steps):
+            try:
+                # concepts, error = mm.extract_concepts(
+                concepts = metamap_concepts(
+                    collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
+                    unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                    no_nums=['all'], exclude_sts=[
+                        'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
+                        'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
+                        'anim', 'inpr'
+                    ],
+                )
+                if concepts:
+                    concepts_collection.extend(process_concepts(concepts))
+            except IndexError:
+                try:
+                    tmp_collection = collection[step * step_size: (step + 1) * step_size]
+                    partition_size = 100
+                    collection_len = len(tmp_collection)
+                    for line_idx in range(len(tmp_collection)):
+                        if len(tmp_collection[line_idx].split()) > partition_size:
+                            tmp_collection.extend(
+                                list(partition(tmp_collection[line_idx].split(), partition_size)))
+                        else:
+                            tmp_collection.append(tmp_collection[line_idx])
+                    tmp_collection = tmp_collection[collection_len:]
+
+                    tmp_steps = len(tmp_collection) // step_size
+                    if len(tmp_collection) % step_size != 0:
+                        tmp_steps += 1
+
+                    for tmp_step in range(tmp_steps):
+                        # concepts, error = mm.extract_concepts(
+                        concepts = metamap_concepts(
+                            tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
+                            word_sense_disambiguation=True,
+                            unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
+                            no_nums=['all'], exclude_sts=[
+                                'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro',
+                                'clna', 'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog',
+                                'pros', 'elii', 'anim', 'inpr'
+                            ], prune=33,
+                        )
+                        if concepts:
+                            concepts_collection.extend(process_concepts(concepts))
+                except IndexError:
+                    continue
+
+        if len(concepts_collection) > 0:
+            with open(
+                    './data/processed_data/diabetes/concepts/{}_{}.pkl'.format(result['uid'], did), 'wb'
+            ) as cfile:
+                pickle.dump(concepts_collection, cfile)
+
+        result['docs'][-1]['tags'] = result['tags']
+        result['docs'][-1]['doc_id'] = str(did)
+        did += 1
+
+    # filter out empty patients
+    if len(result['docs']) < 1:
+        return
+
+    # classify the gender by token counts
+    result['gender'] = simple_gender_clf(all_user_tokens)
+    result['age'] = user_age[result['uid']]
+    if len(result['docs'][-1]) == 0:
+        result['docs'].pop(-1)
+    with open(opath, 'a') as wfile:
+        wfile.write(json.dumps(result) + '\n')
+
+
 def process_diabetes(indir, odir):
     """ Extract the diabetes data according to our needs
 
@@ -791,9 +943,11 @@ def process_diabetes(indir, odir):
     :param odir:
     :return:
     """
-    file_list = [fname for fname in os.listdir(indir) if fname != '.DS_Store']
     opath = os.path.join(odir, 'diabetes.json')
     wfile = open(opath, 'w')
+    wfile.close()
+    if not os.path.exists('./data/processed_data/diabetes/concepts/'):
+        os.mkdir('./data/processed_data/diabetes/concepts/')
 
     # load tokenizers and concept extractor
     # mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
@@ -810,147 +964,9 @@ def process_diabetes(indir, odir):
             if len(line) != len(cols):
                 continue
             user_age[line[user_idx]] = line[age_idx] if line[age_idx] != '-1' else 'x'
-
-    for fname in file_list:
-        print('Working on: ', fname)
-        result = dict()
-        result['uid'] = fname.split('.')[0]
-        all_user_tokens = []
-        fpath = os.path.join(indir, fname)
-        if not os.path.exists('./data/processed_data/diabetes/concepts/'):
-            os.mkdir('./data/processed_data/diabetes/concepts/')
-
-        # convert the xml to json dictionary
-        dfile = xmltodict.parse(open(fpath).read())
-
-        # read the tags of the patient
-        result['tags'] = []
-        result['tags_set'] = set()
-        for tag in dfile['PatientMatching']['TAGS']:
-            # filter out some tags that have low Kappa-agreement < 50%
-            if tag in ['ENGLISH', 'MAKES-DECISIONS', 'ADVANCED-CAD']:
-                continue
-
-            if dfile['PatientMatching']['TAGS'][tag]['@met'] == 'met':
-                result['tags'].append(tag.lower())
-                result['tags_set'].add(tag.lower())
-        result['tags_set'] = list(result['tags_set'])
-
-        # parse every diagnosis report
-        result['docs'] = []
-        separator = '*' * 100  # each report was separated by 100 stars
-        did = 0  # doc id
-
-        for snippet in dfile['PatientMatching']['TEXT'].split(separator):
-            snippet = snippet.strip()
-
-            if len(snippet) < 10:
-                continue
-            # extract date
-            try:
-                snippet = re.split('^Record [d|D]ate: ([^\s]+)*', snippet)[1:]
-                result['docs'][-1]['date'] = snippet[0]
-            except IOError or OSError:
-                print(snippet)
-            snippet = snippet[1]
-
-            # remove the footnote
-            snippet = snippet.split('___________________________________')[0].strip('-').strip()
-            snippet = snippet.split('\n')
-
-            collection = []
-            for idx in range(len(snippet)):
-                line = ' '.join([token.strip() for token in snippet[idx].split() if len(token.strip()) > 0])
-                if len(line) < 5:
-                    continue
-                if idx < 5:
-                    if len(line) < 30:
-                        continue
-                if 'VISIT DATE' in snippet[idx]:
-                    continue
-
-                line = preprocess(line)
-                all_user_tokens.extend(line.split())
-                collection.append(line)
-
-            doc_text = ' '.join(collection)
-            # filter out empty records
-            if len(doc_text.split()) < 10:
-                result['docs'].pop(-1)
-                continue
-            result['docs'][-1]['text'] = doc_text
-
-            concepts_collection = []
-            # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
-            # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
-            step_size = 5
-            steps = len(collection) // step_size
-
-            # reduce line length
-            if len(collection) % step_size != 0:
-                steps += 1
-            for step in range(steps):
-                try:
-                    # concepts, error = mm.extract_concepts(
-                    concepts = metamap_concepts(
-                        collection[step * step_size: (step + 1) * step_size], word_sense_disambiguation=True,
-                        unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
-                        no_nums=['all'], exclude_sts=[
-                            'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro', 'clna',
-                            'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog', 'pros', 'elii',
-                            'anim', 'inpr'
-                        ],
-                    )
-                    concepts_collection.extend(process_concepts(concepts))
-                except IndexError:
-                    try:
-                        tmp_collection = collection[step * step_size: (step + 1) * step_size]
-                        partition_size = 100
-                        collection_len = len(tmp_collection)
-                        for line_idx in range(len(tmp_collection)):
-                            if len(tmp_collection[line_idx].split()) > partition_size:
-                                tmp_collection.extend(
-                                    list(partition(tmp_collection[line_idx].split(), partition_size)))
-                            else:
-                                tmp_collection.append(tmp_collection[line_idx])
-                        tmp_collection = tmp_collection[collection_len:]
-
-                        tmp_steps = len(tmp_collection) // step_size
-                        if len(tmp_collection) % step_size != 0:
-                            tmp_steps += 1
-
-                        for tmp_step in range(tmp_steps):
-                            # concepts, error = mm.extract_concepts(
-                            concepts = metamap_concepts(
-                                tmp_collection[tmp_step * step_size: (tmp_step + 1) * step_size],
-                                word_sense_disambiguation=True,
-                                unique_acronym_variants=True, ignore_stop_phrases=True, no_derivational_variants=True,
-                                no_nums=['all'], exclude_sts=[
-                                    'bpoc', 'spco', 'lang', 'npop', 'orgf', 'qnco', 'tmco', 'hlca', 'idcn', 'hcro',
-                                    'clna', 'ftcn', 'qlco', 'fndg', 'acty', 'mnob', 'plnt', 'podg', 'popg', 'prog',
-                                    'pros', 'elii', 'anim', 'inpr'
-                                ], prune=33,
-                            )
-                            concepts_collection.extend(process_concepts(concepts))
-                    except IndexError:
-                        continue
-
-            with open('./data/processed_data/diabetes/concepts/{}_{}.pkl'.format(result['uid'], did), 'wb') as wfile:
-                pickle.dump(concepts_collection, wfile)
-
-            result['docs'].append(dict())
-            result['docs'][-1]['tags'] = result['tags']
-            result['docs'][-1]['doc_id'] = str(did)
-            did += 1
-
-        # filter out empty patients
-        if len(result['docs']) < 1:
-            continue
-
-        # classify the gender by token counts
-        result['gender'] = simple_gender_clf(all_user_tokens)
-        result['age'] = user_age[result['uid']]
-        wfile.write(json.dumps(result) + '\n')
+    file_list = [(fname, opath, user_age, indir) for fname in os.listdir(indir) if fname != '.DS_Store']
+    pool = Pool(os.cpu_count())
+    pool.map(process_diabetes_thread, file_list)
 
 
 def reformat(code, is_diag):
@@ -1119,7 +1135,6 @@ def process_mimic(indir, odir):
     :param odir:
     :return:
     """
-    results = dict()
     # progressively load the note event
     notes = pd.read_csv(
         indir + 'NOTEEVENTS.csv', dtype=str, index_col='ROW_ID',
@@ -1158,12 +1173,11 @@ def process_mimic(indir, odir):
             del patients[row['SUBJECT_ID']]
 
     print('Filtering and Preprocessing Notes...')
-    # filter out notes by the patients age
-    notes = notes[notes.SUBJECT_ID.isin(set(list(patients.keys())))]
-
     # only limit to the discharge summary
     # similar to https://github.com/jamesmullenbach/caml-mimic/blob/master/notebooks/dataproc_mimic_III.ipynb
     notes = notes[notes.CATEGORY == 'Discharge summary']
+    # filter out notes by the patients age
+    notes = notes[notes.SUBJECT_ID.isin(set(list(patients.keys())))]
     # remove some types of documents
     # notes = notes[notes.CATEGORY.isin([
     #     'Nursing/other', 'Radiology', 'Nursing', 'ECG', 'Physician ',
@@ -1229,8 +1243,8 @@ def process_mimic(indir, odir):
     notes_concepts_dir = './data/processed_data/mimic-iii/concepts/'
     if not os.path.exists(notes_concepts_dir):
         os.mkdir(notes_concepts_dir)
-        # extract_concepts_sequential(notes, notes_concepts_path)
-        extract_concepts_parallel(notes)
+    # extract_concepts_sequential(notes, notes_concepts_path)
+    extract_concepts_parallel(notes)
 
     # preprocess the note documents, filter out documents less than 50 tokens
     # notes.TEXT = notes.TEXT.apply(lambda x: preprocess(x, min_len=50))
@@ -1243,6 +1257,7 @@ def process_mimic(indir, odir):
 
     # loop through each note
     print('Processing each row...')
+    results = dict()
     for index, row in notes.iterrows():
         uid = row['SUBJECT_ID'] + '-' + row['HADM_ID']
         if uid not in results:
@@ -1257,33 +1272,20 @@ def process_mimic(indir, odir):
                 'docs': list(),  # collect all patient notes
             }
 
-        # filter out empty records with less than 40 tokens
-        if len(row['TEXT'].split()) < 50:
-            continue
-
-        try:
-            results[uid]['docs'].append({
-                'doc_id': row['ROW_ID'],
-                'date': row['CHARTDATE'].strftime('%Y-%m-%d'),
-                'text': row['TEXT'],
-                'tags': dfcodes[uid],
-            })
-            results[uid]['tags_set'].update(dfcodes[uid])
-            results[uid]['tags'].extend(dfcodes[uid])
-        except KeyError:
-            continue
-
-        # below implementation will cause insufficient memory error, even with 16G XMx
-        # results = [[]] * len(docs)
-        # concepts = mm.extract_concepts(docs, ids=list(range(len(docs))), word_sense_disambiguation=True)
-        # for concept in concepts:
-        #     results[int(concept.index)].append(concept)
+        results[uid]['docs'].append({
+            'doc_id': index,
+            'date': row['CHARTDATE'].strftime('%Y-%m-%d'),
+            'text': row['TEXT'],
+            'tags': dfcodes[uid],
+        })
+        results[uid]['tags_set'].update(dfcodes[uid])
+        results[uid]['tags'].extend(dfcodes[uid])
 
     opath = os.path.join(odir, 'mimic-iii.json')
     with open(opath, 'w') as wfile:
         for uid in results:
             # filter out empty records
-            if len(results[uid]['docs']) < 1:
+            if len(results[uid]['docs']) == 0:
                 continue
             results[uid]['tags_set'] = list(results[uid]['tags_set'])
             wfile.write(json.dumps(results[uid]) + '\n')
@@ -1306,7 +1308,7 @@ if __name__ == '__main__':
     process_diabetes(diabetes_indir, output_dir + 'diabetes/')
 
     # mimic-iii
-    # mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'
-    # if not os.path.exists(output_dir + 'mimic-iii/'):
-    #     os.mkdir(output_dir + 'mimic-iii/')
-    # process_mimic(mimic_indir, output_dir + 'mimic-iii/')
+    mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'
+    if not os.path.exists(output_dir + 'mimic-iii/'):
+        os.mkdir(output_dir + 'mimic-iii/')
+    process_mimic(mimic_indir, output_dir + 'mimic-iii/')

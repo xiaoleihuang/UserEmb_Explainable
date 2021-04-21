@@ -71,7 +71,7 @@ def data_stats(corpus_path, opath):
                 for concept in doc_entity['concepts']:
                     concepts['num_concept'] += 1
                     concepts['concept_token_stats'].append(concept['preferred_name'])
-                    concepts['concept_type_stats'].append(concept['semtypes'])
+                    concepts['concept_type_stats'].extend(concept['semtypes'])
 
     concepts['num_unique_concept'] = len(set(concepts['concept_token_stats']))
     concepts['num_unique_concept_type'] = len(set(concepts['concept_type_stats']))
@@ -109,7 +109,7 @@ def data_stats(corpus_path, opath):
 
 
 if __name__ == '__main__':
-    dlist = ['diabetes', 'mimic-iii']
+    dlist = ['diabetes', ]  # 'mimic-iii'
     odir = './resources/analyze/'
     indir = './data/processed_data/'
     if not os.path.exists(odir):

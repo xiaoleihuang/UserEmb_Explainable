@@ -31,7 +31,7 @@ from tqdm import tqdm
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s %(process)s %(levelname)s %(message)s',
-    filename='./resources/concepts.log',
+    filename='../resources/concepts.log',
     filemode='a'
 )
 
@@ -106,7 +106,7 @@ def preprocess(doc, stopwords=None, min_len=None):
     doc = re.sub(r"([^A-Za-z0-9\s](\s)){2,}", " ", doc)  # remove consecutive punctuations
 
     # ellipsis normalization
-    doc = re.sub(r'\.+', '.', doc)
+    doc = re.sub(r'\.+', '', doc)
     doc = re.sub(r'!+', '!', doc)
     doc = re.sub(r'\*+', ' ', doc)
     doc = re.sub(r'_+', ' ', doc)
@@ -197,7 +197,7 @@ def metamaplite_concepts(sentences=None, ids=None,
               and whatever was processed, if anything, will be
               returned along with the error found.
     """
-    metamap_home = '/data/xiaolei/public_mm_lite/'
+    metamap_home = os.environ['METAMAP_HOME']
     if not sentences:
         raise ValueError("You must either pass a list of sentences.")
 
@@ -915,7 +915,7 @@ def process_diabetes_thread(finfo):
 
         if len(concepts_collection) > 0:
             with open(
-                    './data/processed_data/diabetes/concepts/{}_{}.pkl'.format(result['uid'], did), 'wb'
+                    os.environ['CONCEPT_ODIR'] + '{}_{}.pkl'.format(result['uid'], did), 'wb'
             ) as cfile:
                 pickle.dump(concepts_collection, cfile)
 
@@ -946,15 +946,15 @@ def process_diabetes(indir, odir):
     opath = os.path.join(odir, 'diabetes.json')
     wfile = open(opath, 'w')
     wfile.close()
-    if not os.path.exists('./data/processed_data/diabetes/concepts/'):
-        os.mkdir('./data/processed_data/diabetes/concepts/')
+    if not os.path.exists(os.environ['CONCEPT_ODIR']):
+        os.mkdir(os.environ['CONCEPT_ODIR'])
 
     # load tokenizers and concept extractor
     # mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
 
     # extract age information
     user_age = dict()
-    with open('./resources/diabetes_age.csv') as dfile:
+    with open('resources/diabetes_age.csv') as dfile:
         cols = dfile.readline().strip().split()
         user_idx = cols.index('uid')
         age_idx = cols.index('age')
@@ -1018,7 +1018,7 @@ def get_concept_thread(input_text):
     # parameters documentation: https://metamap.nlm.nih.gov/Docs/MM_2016_Usage.pdf
     # https://metamap.nlm.nih.gov/Docs/README_javaapi.shtml
     row_id, input_text, uid = input_text
-    if os.path.exists('./data/processed_data/mimic-iii/concepts/{}.pkl'.format(row_id)):
+    if os.path.exists(os.environ['CONCEPT_ODIR'] + '{}.pkl'.format(row_id)):
         return
     collection = sent_tokenize(input_text)
     step_size = 5
@@ -1027,7 +1027,7 @@ def get_concept_thread(input_text):
         steps += 1
 
     concepts_collection = []
-    mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
+    mm = MetaMap.get_instance(os.environ['METAMAP_HOME'])
     # mm = MetaMapLite.get_instance('/data/xiaolei/public_mm_lite/')
 
     for step in tqdm(range(steps)):
@@ -1092,7 +1092,7 @@ def get_concept_thread(input_text):
         logging.debug("Finished concept extraction with ROW_ID %s." % row_id)
 
     if len(concepts_collection) > 0:
-        with open('./data/processed_data/mimic-iii/concepts/{}_{}.pkl'.format(uid, row_id), 'wb') as wfile:
+        with open(os.environ['CONCEPT_ODIR'] + '{}_{}.pkl'.format(uid, row_id), 'wb') as wfile:
             pickle.dump(concepts_collection, wfile)
 
 
@@ -1213,7 +1213,7 @@ def process_mimic(indir, odir):
     # load icd codes
     print('Converting ICD codes...')
     icd_encoder = dict()
-    dfile = yaml.load(open('./resources/hcup_ccs_2015_definitions.yaml'), Loader=yaml.FullLoader)
+    dfile = yaml.load(open('../resources/hcup_ccs_2015_definitions.yaml'), Loader=yaml.FullLoader)
     for tmp_key in dfile:
         for tmp_code in dfile[tmp_key]['codes']:
             icd_encoder[tmp_code] = tmp_key
@@ -1240,7 +1240,7 @@ def process_mimic(indir, odir):
             dfcodes[code_id].append(icd_encoder.get(line[icd_idx].strip()))
 
     # extract concepts from the notes
-    notes_concepts_dir = './data/processed_data/mimic-iii/concepts/'
+    notes_concepts_dir = os.environ['CONCEPT_ODIR']
     if not os.path.exists(notes_concepts_dir):
         os.mkdir(notes_concepts_dir)
     # extract_concepts_sequential(notes, notes_concepts_path)
@@ -1293,7 +1293,8 @@ def process_mimic(indir, odir):
 
 if __name__ == '__main__':
     # flist = ['amazon', 'diabetes', 'mimic']
-    output_dir = './data/processed_data/'
+    output_dir = 'data/processed_data/'
+    os.environ['METAMAP_HOME'] = '/data/xiaolei/public_mm_lite/'
 
     # amazon health dataset
     # amazon_indir = './data/raw_data/amazon/'
@@ -1302,13 +1303,15 @@ if __name__ == '__main__':
     # process_amazon(amazon_indir, output_dir + 'amazon/')
 
     # diabetes
-    diabetes_indir = './data/raw_data/diabetes/all/'
+    diabetes_indir = './raw_data/diabetes/all/'
+    os.environ['CONCEPT_ODIR'] = './processed_data/{}/concepts/'.format('diabetes')
     if not os.path.exists(output_dir + 'diabetes/'):
         os.mkdir(output_dir + 'diabetes/')
     process_diabetes(diabetes_indir, output_dir + 'diabetes/')
 
     # mimic-iii
     mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'
+    os.environ['CONCEPT_ODIR'] = './processed_data/{}/concepts/'.format('mimic-iii')
     if not os.path.exists(output_dir + 'mimic-iii/'):
         os.mkdir(output_dir + 'mimic-iii/')
     process_mimic(mimic_indir, output_dir + 'mimic-iii/')

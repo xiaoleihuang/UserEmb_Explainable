@@ -39,17 +39,27 @@ This will ensure you follow basic ethic rules to use the datasets. The datasets 
     * Please check the requirements.txt
 
 # Data Analysis
+Data analysis scripts will be under the folder of `data`. 
+We probe data via two types of analysis aspects, records and concepts.
 
+# Experimental Steps
 
-# How to Run
-
-* Data Preprocessing
-    * Be sure to change data directory before running `python data_builder.py`
-* Baselines
+1. Data Preprocessing
+    * Be sure to change data directory before running: 
+        * `python data_builder.py`;
+    * For the mimic-iii data, you have to change the mimic-iii to your own path;
+    * For the diabetes data, first, you need to put both training and testing cases into one directory,
+      in our case, we named the directory as `all`;
+    * Then go to the `data` directory and run the following lines:
+      * `python data_analyzer.py`;
+      * `python concept_analyzer.py`;
+      * The two scripts will generate necessary data stats and concept vocabularies for training models.
+2. Baselines
     * All baseline models will be under the directory of `./baselines/`;
     * Run `python any_baseline_script.py` will start to train user embeddings;
-* Our approach
-    * 
+3. Our approach
+    * Run the following script will create entity augmented user representations;
+      * `python Uemb_Explain.py`
 
 # Contact
 

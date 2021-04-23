@@ -30,14 +30,6 @@ def data_stats(corpus_path, opath):
     results['num_tag'] = 0
     results['tag_stats'] = []
 
-    # concept info
-    concepts = dict()
-    concepts['num_concept'] = 0
-    concepts['num_unique_concept'] = 0
-    concepts['num_unique_concept_type'] = 0
-    concepts['concept_type_stats'] = []
-    concepts['concept_token_stats'] = []
-
     with open(corpus_path) as dfile:
         for line in dfile:
             if len(line) < 10:
@@ -67,17 +59,6 @@ def data_stats(corpus_path, opath):
                     results['max_token_per_doc'] = len(tokens)
                 if len(tokens) < results['min_token_per_doc']:
                     results['min_token_per_doc'] = len(tokens)
-
-                for concept in doc_entity['concepts']:
-                    concepts['num_concept'] += 1
-                    concepts['concept_token_stats'].append(concept['preferred_name'])
-                    concepts['concept_type_stats'].extend(concept['semtypes'])
-
-    concepts['num_unique_concept'] = len(set(concepts['concept_token_stats']))
-    concepts['num_unique_concept_type'] = len(set(concepts['concept_type_stats']))
-    concepts['concept_token_stats'] = Counter(concepts['concept_token_stats']).most_common()
-    concepts['concept_type_stats'] = Counter(concepts['concept_type_stats']).most_common()
-    json.dump(concepts, open(os.path.splitext(opath)[0] + '_concept.json', 'w'), indent=4)
 
     results['ratio_male'] /= results['num_user']
     results['ratio_male'] = round(results['ratio_male'], 2)
@@ -109,7 +90,7 @@ def data_stats(corpus_path, opath):
 
 
 if __name__ == '__main__':
-    dlist = ['diabetes', ]  # 'mimic-iii'
+    dlist = ['diabetes', 'mimic-iii']  # 'diabetes', 'mimic-iii'
     odir = '../resources/analyze/'
     indir = './processed_data/'
     if not os.path.exists(odir):

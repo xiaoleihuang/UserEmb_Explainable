@@ -20,7 +20,7 @@ def user_doc_builder(user_docs, all_docs, user_docs_indices, negative_samples=1)
 
         user_docs (dict): user docs
         sequence (list): a sequence of word indices
-        doc_size (int): document size
+        emb_dim (int): document size
     """
     uids = list(user_docs.keys())
     np.random.shuffle(uids)
@@ -71,8 +71,8 @@ def build_model(params=None):
             'user_size': 8000,
             'emb_dim': 300,
             'dp_rate': .2,
-            'word_emb_path': './resources/word_emb.npy',
-            'user_emb_path': './resources/user_emb.npy',
+            'word_emb_path': '../resources/word_emb.npy',
+            'user_emb_path': '../resources/user_emb.npy',
             'word_emb_train': False,
             'user_emb_train': True,
             'user_task_weight': 1,
@@ -90,13 +90,13 @@ def build_model(params=None):
     # load weights if word embedding path is given
     if os.path.exists(params['word_emb_path']):
         doc_emb = keras.layers.Embedding(
-            params['doc_size'], params['emb_dim'],
+            params['emb_dim'], params['emb_dim'],
             weights=[np.load(params['doc_emb_path'])],
             trainable=params['word_emb_train'], name='doc_emb'
         )
     else:
         doc_emb = keras.layers.Embedding(
-            params['doc_size'], params['emb_dim'],
+            params['emb_dim'], params['emb_dim'],
             trainable=params['doc_emb_path'], name='doc_emb'
         )
 
@@ -180,7 +180,7 @@ def build_emb_layer(tokenizer, emb_path, save_path, emb_dim=300):
         raise ValueError('Current other formats are not supported!')
 
 
-def main(data_name, encode_directory, odirectory='./resources/'):
+def main(data_name, encode_directory, odirectory='../resources/'):
     # load corpus data
     user_corpus = dict()
     all_docs = []
@@ -201,8 +201,8 @@ def main(data_name, encode_directory, odirectory='./resources/'):
         'emb_dim': 300,
         'dp_rate': .2,
         'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
-        'word_emb_path': './resources/embedding/{}/word_emb.npy'.format(data_name),
-        'user_emb_path': './resources/embedding/{}/user_emb.npy'.format(data_name),
+        'word_emb_path': '../resources/embedding/{}/word_emb.npy'.format(data_name),
+        'user_emb_path': '../resources/embedding/{}/user_emb.npy'.format(data_name),
         'word_emb_train': False,
         'user_emb_train': True,
         'user_task_weight': 1,
@@ -239,8 +239,8 @@ def main(data_name, encode_directory, odirectory='./resources/'):
     if not os.path.exists(encode_directory + 'user_encoder.json'):
         json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))
 
-    if not os.path.exists('./resources/embedding/{}/'.format(data_name)):
-        os.mkdir('./resources/embedding/{}/'.format(data_name))
+    if not os.path.exists('../resources/embedding/{}/'.format(data_name)):
+        os.mkdir('../resources/embedding/{}/'.format(data_name))
 
     # build datasets
     user_docs, labels = user_doc_builder(

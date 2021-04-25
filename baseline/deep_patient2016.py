@@ -78,14 +78,14 @@ class Lda2User(object):
         self.device = kwargs['device']
 
         self.ae = AE(self.model.num_topics, 500)  # default value in paper
-        if not self.ae_path:
+        if not os.path.exists(self.ae_path):
             self.train_autoencoder()
         else:
             self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
 
     def train_autoencoder(self):
         user_features = list(self.lda2user().values())
-        user_features = TensorDataset(torch.tensor(user_features))
+        user_features = TensorDataset(torch.FloatTensor(user_features))
         user_features = DataLoader(user_features, batch_size=32, shuffle=True)
 
         optimizer = torch.optim.Adam(self.ae.parameters(), lr=.001)
@@ -94,6 +94,7 @@ class Lda2User(object):
 
         for _ in tqdm(range(10)):
             for idx, batch in enumerate(user_features):
+                batch = batch[0]
                 batch.to(self.device)
                 output, _ = self.ae(batch)  # omit encoded features
                 loss = criterion(output, batch)
@@ -175,7 +176,7 @@ if __name__ == '__main__':
     model_path = task_dir + 'lda.model'
     autoencoder_path = task_dir + 'ae_model.pth'
 
-    # Lda2User
+    # auto encoder 2 user
     if torch.cuda.is_available():
         device = torch.device('cuda')
     else:

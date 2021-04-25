@@ -86,7 +86,67 @@ def qual_concepts_sim(**kwargs):
 
     concept_files = set(os.listdir(concept_dir))
     data_stats = json.load(open(data_stats_path))
-    pass
+    labels = [item[0] for item in data_stats['tag_stats']]
+
+    # get the user_docs
+    if os.path.exists(odir + 'user_docs_{}.pkl'.format(task_name)):
+        user_docs = pickle.load(open(odir + 'user_docs_{}.pkl'.format(task_name), 'rb'))
+    else:
+        user_docs = {}
+        with open(corpus_path) as dfile:
+            for line in dfile:
+                user_entry = json.loads(line)
+                if user_entry['uid'] not in user_docs:
+                    user_docs[user_entry['uid']] = {
+                        'doc': '',
+                        'entity': [],
+                        'label': [0] * len(labels),
+                    }
+                label_set = set(user_entry['tags'])
+
+                # get label
+                for idx, tag in enumerate(labels):
+                    if tag in label_set:
+                        user_docs[user_entry['uid']]['label'][idx] = 1
+                if sum(user_docs[user_entry['uid']]['label']) in [0, 10]:
+                    del user_docs[user_entry['uid']]
+                    continue
+
+                # get concepts and docs
+                uid = user_entry['uid'].split('-')[0]
+                for doc_entry in user_entry['docs']:
+                    did = doc_entry['doc_id']
+                    fname = '{}_{}.pkl'.format(uid, did)
+                    if fname in concept_files:
+                        concepts = pickle.load(open(concept_dir + fname, 'rb'))
+                        concepts = [item['preferred_name'] for item in concepts]
+                        user_docs[user_entry['uid']]['entity'].extend(concepts)
+
+                    user_docs[user_entry['uid']]['doc'] += ' ' + doc_entry['text']
+
+        with open(odir + 'user_docs_{}.pkl'.format(task_name), 'wb') as wfile:
+            pickle.dump(user_docs, wfile)
+
+    # build document feature encoder
+    if os.path.exists(odir + 'vectorizer_doc_{}.pkl'.format(task_name)):
+        vect_doc = pickle.load(open(odir + 'vectorizer_doc_{}.pkl'.format(task_name), 'rb'))
+    else:
+        vect_doc = TfidfVectorizer(
+            max_features=10000, tokenizer=dummy_func, preprocessor=dummy_func)
+        vect_doc.fit([user_docs[uid]['doc'] for uid in user_docs])
+        with open(odir + 'vectorizer_doc_{}.pkl'.format(task_name), 'wb') as wfile:
+            pickle.dump(vect_doc, wfile)
+
+    # build concept feature encoder
+    if os.path.exists(odir + 'vectorizer_concept_{}.pkl'.format(task_name)):
+        vect_concept = pickle.load(open(odir + 'vectorizer_concept_{}.pkl'.format(task_name), 'rb'))
+    else:
+        vect_concept = TfidfVectorizer(max_features=10000, tokenizer=dummy_func, preprocessor=dummy_func)
+        vect_concept.fit([user_docs[uid]['entity'] for uid in user_docs])
+        with open(odir + 'vectorizer_concept_{}.pkl'.format(task_name), 'wb') as wfile:
+            pickle.dump(vect_concept, wfile)
+
+
 
 
 def dummy_func(doc):
@@ -146,7 +206,7 @@ def quant_concepts_sim(**kwargs):
                     user_docs[user_entry['uid']] = {
                         'doc': [],
                         'entity': [],
-                        'label': [0] * 10,
+                        'label': [0] * len(top_labels),
                     }
                 label_set = set(user_entry['tags'])
 
@@ -154,7 +214,7 @@ def quant_concepts_sim(**kwargs):
                 for idx, tag in enumerate(top_labels):
                     if tag in label_set:
                         user_docs[user_entry['uid']]['label'][idx] = 1
-                if sum(user_docs[user_entry['uid']]['label']) in [0, 10]:
+                if sum(user_docs[user_entry['uid']]['label']) in [0, len(top_labels)]:
                     del user_docs[user_entry['uid']]
                     continue
 

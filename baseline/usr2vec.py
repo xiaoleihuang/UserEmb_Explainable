@@ -99,9 +99,10 @@ def build_model(params=None):
 
     # load weights if word embedding path is given
     if os.path.exists(params['word_emb_path']):
+        weights = np.load(params['word_emb_path'])
         word_emb = keras.layers.Embedding(
-            params['vocab_size'], params['emb_dim'],
-            weights=[np.load(params['word_emb_path'])],
+            params['vocab_size'], weights.shape[1],
+            weights=[weights],
             trainable=params['word_emb_train'], name='word_emb',
             input_length=1,
         )
@@ -128,6 +129,10 @@ def build_model(params=None):
     '''User Word Dot Production'''
     user_rep = user_emb(user_input)
     word_rep = word_emb(word_input)
+    if word_emb.output_dim != params['emb_dim']:
+        word_rep = keras.layers.Dense(
+            params['emb_dim'], activation='sigmoid', name='dimension_transform'
+        )(word_rep)
 
     user_word_dot = keras.layers.dot(
         [user_rep, word_rep], axes=-1
@@ -150,23 +155,24 @@ def build_model(params=None):
         outputs=user_pred
     )
     ud_model.compile(loss='binary_crossentropy', optimizer=optimizer)
+    print(ud_model.summary())
 
     return ud_model
 
 
-def build_emb_layer(tokenizer, emb_path, save_path, emb_dim=300):
+def build_emb_layer(tokenizer, emb_path, save_path):
     """"""
     # support three types, bin/txt/npy
     emb_len = len(tokenizer.word_index)
     if emb_len > tokenizer.num_words:
         emb_len = tokenizer.num_words
 
-    emb_model = np.zeros((emb_len, emb_dim))
     if emb_path.endswith('.bin'):
         w2v_model = gensim.models.KeyedVectors.load_word2vec_format(
             emb_path, binary=True
         )
-        for pair in zip(w2v_model.wv.index2word, w2v_model.wv.syn0):
+        emb_model = np.zeros((emb_len, w2v_model.vector_size))
+        for pair in zip(w2v_model.index2word, w2v_model.vectors):
             if pair[0] in tokenizer.word_index and \
                     tokenizer.word_index[pair[0]] < tokenizer.num_words:
                 emb_model[tokenizer.word_index[pair[0]]] = pair[1]
@@ -175,6 +181,10 @@ def build_emb_layer(tokenizer, emb_path, save_path, emb_dim=300):
         np.save(save_path, emb_model)
 
     elif emb_path.endswith('.txt'):
+        line = open(emb_path).readline()
+        emb_model = np.zeros((emb_len, len(line.strip().split())-1))  # first one is a word not vector.
+        emb_dim = len(line.strip().split()) - 1
+
         with open(emb_path) as dfile:
             for line in dfile:
                 line = line.strip().split()
@@ -186,6 +196,7 @@ def build_emb_layer(tokenizer, emb_path, save_path, emb_dim=300):
                 if word in tokenizer.word_index and \
                         tokenizer.word_index[word] < tokenizer.num_words:
                     emb_model[tokenizer.word_index[word]] = vectors
+
         # save the extracted embedding weights
         np.save(save_path, emb_model)
     else:
@@ -193,9 +204,6 @@ def build_emb_layer(tokenizer, emb_path, save_path, emb_dim=300):
 
 
 def main(data_name, encode_directory, odirectory='../resources/'):
-    # load corpus data
-    user_corpus = dict()
-
     # load tokenizer
     if os.path.exists(encode_directory + data_name + '.tkn'):
         tok = pickle.load(open(encode_directory + data_name + '.tkn', 'rb'))
@@ -232,27 +240,32 @@ def main(data_name, encode_directory, odirectory='../resources/'):
     }
 
     # load user encoder, which convert users into indices
-    user_encoder = dict()
-    if os.path.exists(encode_directory + 'user_encoder.json'):
+    if os.path.exists(odirectory + 'train_corpus.pkl') and \
+            os.path.exists(encode_directory + 'user_encoder.json'):
+        user_corpus = pickle.load(open(odirectory + 'train_corpus.pkl', 'rb'))
         user_encoder = json.load(open(encode_directory + 'user_encoder.json'))
+    else:
+        user_corpus = dict()
+        user_encoder = dict()
+        with open(encode_directory + data_name + '.json') as dfile:
+            for idx, line in enumerate(dfile):
+                user_info = json.loads(line)
+                user_info['uid'] = str(user_info['uid'])
+                if user_info['uid'] not in user_encoder:
+                    user_encoder[user_info['uid']] = len(user_encoder)
+                user_info['uid'] = user_encoder[user_info['uid']]
 
-    with open(encode_directory + data_name + '.json') as dfile:
-        for idx, line in enumerate(dfile):
-            user_info = json.loads(line)
-            user_info['uid'] = str(user_info['uid'])
-            if user_info['uid'] not in user_encoder:
-                user_encoder[user_info['uid']] = len(user_encoder)
-            user_info['uid'] = user_encoder[user_info['uid']]
+                user_corpus[user_info['uid']] = []
 
-            user_corpus[user_info['uid']] = []
-
-            for doc in user_info['docs']:
-                user_corpus[user_info['uid']].append(
-                    tok.texts_to_sequences([doc['text']])[0]
-                )
+                for doc in user_info['docs']:
+                    user_corpus[user_info['uid']].append(
+                        tok.texts_to_sequences([doc['text']])[0]
+                    )
+        pickle.dump(user_corpus, open(odirectory + 'train_corpus.pkl', 'wb'))
+        json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))
 
     # update user information
-    params['user_size'] = len(user_info) + 1
+    params['user_size'] = len(user_encoder) + 1
     if not os.path.exists(encode_directory + 'user_encoder.json'):
         json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))
 
@@ -261,29 +274,30 @@ def main(data_name, encode_directory, odirectory='../resources/'):
 
     # build datasets
     user_words, labels = user_doc_builder(
-        user_corpus, tok.num_words, negative_samples=params['negative_sample'], odir=odirectory
+        user_corpus, tok.num_words, negative_samples=params['negative_sample'], output_dir=odirectory
     )
 
     # build embedding model
-    build_emb_layer(
-        tok, params['emb_path'], params['word_emb_path'], params['emb_dim']
-    )
+    if not os.path.exists(params['word_emb_path']):
+        build_emb_layer(
+            tok, params['emb_path'], params['word_emb_path']
+        )
 
     ud_model = build_model(params)
     print()
     print(params)
 
-    for epoch in range(params['epochs']):
+    for epoch in tqdm(range(params['epochs'])):
         loss = 0
 
         train_iter = user_doc_generator(
             user_words, labels, params['batch_size']
         )
 
-        for step, train_batch in tqdm(enumerate(train_iter)):
+        for step, train_batch in enumerate(train_iter):
             '''user info, uw: user-word'''
             ud_pairs, ud_labels = train_batch
-            ud_pairs = [np.array(x) for x in zip(*ud_pairs)]
+            ud_pairs = [np.array(x, dtype=np.int32) for x in zip(*ud_pairs)]
             ud_labels = np.array(ud_labels, dtype=np.int32)
 
             '''Train'''
@@ -307,7 +321,7 @@ if __name__ == '__main__':
     encode_dir = '../data/processed_data/'
     encode_dir = encode_dir + dname + '/'
 
-    odir = '../resources/{}/'.format(dname)
+    odir = '../resources/embedding/{}/'.format(dname)
     if not os.path.exists(odir):
         os.mkdir(odir)
     odir = odir + 'user2vec/'

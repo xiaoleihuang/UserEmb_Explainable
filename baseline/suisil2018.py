@@ -40,9 +40,9 @@ def get_tfidf_vect(task_name, concept_directory, save_dir):
         if uid not in user_concepts:
             user_concepts[uid] = []
         concepts = pickle.load(open(concept_directory + fname, 'rb'))
-        user_concepts[uid].extend([concept['preferred_name'].lowe() for concept in concepts])
+        user_concepts[uid].extend([concept['preferred_name'].lower() for concept in concepts])
 
-    tfidf_vect = TfidfVectorizer(tokenizer=dummy_func, preprocessor=dummy_func, max_features=1000)
+    tfidf_vect = TfidfVectorizer(tokenizer=dummy_func, preprocessor=dummy_func, max_features=10000)
     tfidf_vect.fit(list(user_concepts.values()))
     with open(opath, 'wb') as tfidf_file:
         pickle.dump(tfidf_vect, tfidf_file)
@@ -97,7 +97,7 @@ class Doc2User(object):
         self.mode = kwargs['mode']
 
         self.ae = AE(len(self.tf_idf_vect.vocabulary_), 150)
-        if not self.ae_path:
+        if not os.path.exists(self.ae_path):
             self.train_autoencoder()
         else:
             self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
@@ -116,7 +116,7 @@ class Doc2User(object):
         user_features = self.tf_idf_vect.transform(
             list(user_concepts.values())
         ).toarray()
-        user_features = TensorDataset(torch.tensor(user_features))
+        user_features = TensorDataset(torch.FloatTensor(user_features))
         user_features = DataLoader(user_features, batch_size=32, shuffle=True)
 
         optimizer = torch.optim.Adam(self.ae.parameters(), lr=.001)
@@ -124,7 +124,8 @@ class Doc2User(object):
         self.ae.train()
 
         for _ in tqdm(range(10)):  # train 10 epochs
-            for idx, batch in enumerate(user_features):
+            for batch in user_features:
+                batch = batch[0]
                 batch.to(self.device)
                 output, _ = self.ae(batch)  # omit encoded features
                 loss = criterion(output, batch)
@@ -146,7 +147,7 @@ class Doc2User(object):
                 if user['uid'] not in user_docs:
                     user_docs[user['uid']] = []
                 if user['uid'] not in user_concepts:
-                    user_concepts[uid] = []
+                    user_concepts[user['uid']] = []
 
                 # because data builder takes patient per stay as a patient,
                 # instead of multiple stays
@@ -165,7 +166,7 @@ class Doc2User(object):
                             user_docs[user['uid']][0].extend(doc_entity['text'].split())
 
                     # get concept files
-                    concept_fname = '{}_{}.pkl'.format(uid, doc_entity['did'])
+                    concept_fname = '{}_{}.pkl'.format(uid, doc_entity['doc_id'])
                     if os.path.exists(concept_directory + concept_fname):
                         concepts = pickle.load(open(concept_directory + concept_fname, 'rb'))
                         user_concepts[user['uid']].extend(
@@ -181,26 +182,19 @@ class Doc2User(object):
         for idx in range(steps):
             batch_uids = uids[idx*batch_size: (idx + 1)*batch_size]
             batch_features = [user_concepts[item_uid] for item_uid in batch_uids]
-            batch_features = self.tf_idf_vect.transform(batch_features)
-            _, batch_features = self.ae(batch_features)
+            batch_features = torch.FloatTensor(self.tf_idf_vect.transform(batch_features).toarray())
+            # batch_features.to(self.device)
+            with torch.no_grad():
+                _, batch_features = self.ae(batch_features)
             batch_features = batch_features.cpu().detach().numpy()
 
             for batch_idx in range(len(batch_uids)):
                 user_features[batch_uids[batch_idx]] = []
                 # concept features
                 user_features[batch_uids[batch_idx]].extend(batch_features[batch_idx])
-                docs_features = []
-
-                outputs = [
+                docs_features = [
                     self.doc2vec.infer_vector(doc) for doc in user_docs[batch_uids[batch_idx]]
                 ]
-
-                for tmp_vector in outputs:
-                    doc_vector = [0.] * self.doc2vec.vector_size
-                    for item in tmp_vector:
-                        doc_vector[item[0]] = item[1]
-                    docs_features.append(doc_vector)
-
                 # average the lda inferred documents
                 docs_features = np.mean(docs_features, axis=0)
                 user_features[batch_uids[batch_idx]].extend(docs_features)
@@ -238,7 +232,7 @@ if __name__ == '__main__':
 
     if not os.path.exists(doc2vec_path):
         doc2vec_path = train_doc2v(
-            task, raw_dir='../data/processed_data/{}/', odir=odir, dim=150
+            task, input_path=task_data_path, odir=odir, dim=150
         )
 
     # Doc2Vec + Concept

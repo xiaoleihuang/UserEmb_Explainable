@@ -60,7 +60,7 @@ def train_lda(dname, raw_dir='../data/raw/', odir='../resources/embedding/', dim
     model.save(odir + 'lda.model')
 
 
-def train_doc2v(dname, raw_dir='../data/raw/', odir='../resources/embedding/', dim=300):
+def train_doc2v(dname, input_path, odir='../resources/embedding/', dim=300):
     """ Build paragraph2vec model
     """
 
@@ -72,13 +72,11 @@ def train_doc2v(dname, raw_dir='../data/raw/', odir='../resources/embedding/', d
                     line = doc_entity['text'].split()
                     yield TaggedDocument(line, [user['uid'] + str(idx)])
 
-    odir = odir + dname + '/'
     if not os.path.exists(odir):
         os.mkdir(odir)
 
     # load the corpus
-    dpath = raw_dir + dname + '/' + dname + '.json'
-    corpus = read_corpus(dpath)
+    corpus = read_corpus(input_path)
 
     # init, train and save the model
     model = Doc2Vec(
@@ -138,7 +136,10 @@ if __name__ == '__main__':
         train_lda(data_name, raw_dir=data_dir, odir=save_dir)
     elif model_name == 'doc2vec':
         print('Training Doc2vec: ', data_name)
-        train_doc2v(data_name, raw_dir=data_dir, odir=save_dir)
-
+        train_doc2v(
+            data_name, 
+            input_path=data_dir+data_name+'/{}.json'.format(data_name), 
+            odir=save_dir+data_name+'/'
+        )
     else:
         raise ValueError('Model name, {}, is not in supported now...'.format(model_name))

@@ -3,18 +3,19 @@ import os
 import pickle
 import sys
 
+from tqdm import tqdm
 import keras
 import numpy as np
-
 from keras_preprocessing.text import Tokenizer
 import gensim
 from gensim.models.doc2vec import Doc2Vec
-from keras.preprocessing.sequence import pad_sequences
+# from keras.preprocessing.sequence import pad_sequences
 # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # for cpu usage
 # os.environ["CUDA_VISIBLE_DEVICES"] = ""
+from baseline_utils import user_word_sampler
 
 
-def user_doc_builder(user_docs, all_docs, user_docs_indices, negative_samples=1):
+def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
     """This function was re-implemented from the Silvio Amir
     https://github.com/samiroid/usr2vec/tree/master/code
 
@@ -22,26 +23,35 @@ def user_doc_builder(user_docs, all_docs, user_docs_indices, negative_samples=1)
         sequence (list): a sequence of word indices
         emb_dim (int): document size
     """
-    uids = list(user_docs.keys())
-    np.random.shuffle(uids)
-    couples = []
-    labels = []
+    if os.path.exists(output_dir + 'usr2vec_user_docs.pkl'):
+        tmp = pickle.load(open(output_dir + 'usr2vec_user_docs.pkl', 'rb'))
+        return tmp['couples'], tmp['labels']
+    else:
+        uids = list(user_docs.keys())
+        np.random.shuffle(uids)
+        couples = []
+        labels = []
 
-    for uid in uids:
-        for doc in user_docs[uid]:
-            couples.append([uid, doc])
-            labels.append(1)
+        for uid in uids:
+            for doc in user_docs[uid]:
+                doc_couples, doc_labels = user_word_sampler(
+                    uid=uid, sequence=doc, vocab_size=vocab_size, negative_samples=negative_samples
+                )
+                couples.extend(doc_couples)
+                labels.extend(doc_labels)
 
-            sample_space = [idx for idx in list(range(len(all_docs))) if idx not in user_docs_indices[uid]]
-            sample_space = np.random.choice(sample_space, size=negative_samples, replace=False)
-            for idx in sample_space:
-                labels.append(0)
-                couples.append([uid, all_docs[idx]])
+        couples = np.asarray(couples, dtype=object)
+        labels = np.asarray(labels)
 
-    couples = np.asarray(couples, dtype=object)
-    labels = np.asarray(labels)
+        tmp = {
+            'couples': couples,
+            'labels': labels
+        }
+        with open(output_dir + 'usr2vec_user_docs.pkl', 'wb') as wfile:
+            pickle.dump(tmp, wfile)
+        del tmp
 
-    return couples, labels
+        return couples, labels
 
 
 def user_doc_generator(couples, labels, batch_size):
@@ -85,19 +95,21 @@ def build_model(params=None):
 
     # User Input
     user_input = keras.layers.Input((1,), name='user_input', dtype='int32')
-    doc_input = keras.layers.Input((params['max_len'],), name='doc_input', dtype='int32')
+    word_input = keras.layers.Input((1,), name='word_input', dtype='int32')
 
     # load weights if word embedding path is given
     if os.path.exists(params['word_emb_path']):
-        doc_emb = keras.layers.Embedding(
-            params['emb_dim'], params['emb_dim'],
-            weights=[np.load(params['doc_emb_path'])],
-            trainable=params['word_emb_train'], name='doc_emb'
+        word_emb = keras.layers.Embedding(
+            params['vocab_size'], params['emb_dim'],
+            weights=[np.load(params['word_emb_path'])],
+            trainable=params['word_emb_train'], name='word_emb',
+            input_length=1,
         )
     else:
-        doc_emb = keras.layers.Embedding(
-            params['emb_dim'], params['emb_dim'],
-            trainable=params['doc_emb_path'], name='doc_emb'
+        word_emb = keras.layers.Embedding(
+            params['vocab_size'], params['emb_dim'],
+            trainable=params['word_emb_train'], name='word_emb',
+            input_length=1,
         )
 
     # load weights if user embedding path is given
@@ -113,17 +125,17 @@ def build_model(params=None):
             trainable=params['user_emb_train'], name='user_emb'
         )
 
-    '''User Document Dot Production'''
+    '''User Word Dot Production'''
     user_rep = user_emb(user_input)
-    doc_rep = doc_emb(doc_input)
+    word_rep = word_emb(word_input)
 
-    user_doc_dot = keras.layers.dot(
-        [user_rep, doc_rep], axes=-1
+    user_word_dot = keras.layers.dot(
+        [user_rep, word_rep], axes=-1
     )
-    user_doc_dot = keras.layers.Reshape((1,))(user_doc_dot)
+    user_word_dot = keras.layers.Reshape((1,))(user_word_dot)
     user_pred = keras.layers.Dense(
         1, activation='sigmoid', name='user_pred'
-    )(user_doc_dot)
+    )(user_word_dot)
 
     '''Compose model'''
     if params['optimizer'] == 'adam':
@@ -132,9 +144,9 @@ def build_model(params=None):
         optimizer = keras.optimizers.SGD(
             lr=params['lr'], decay=1e-6, momentum=0.9, nesterov=True)
 
-    # user doc model
+    # user word model
     ud_model = keras.models.Model(
-        inputs=[user_input, doc_input],
+        inputs=[user_input, word_input],
         outputs=user_pred
     )
     ud_model.compile(loss='binary_crossentropy', optimizer=optimizer)
@@ -183,16 +195,22 @@ def build_emb_layer(tokenizer, emb_path, save_path, emb_dim=300):
 def main(data_name, encode_directory, odirectory='../resources/'):
     # load corpus data
     user_corpus = dict()
-    all_docs = []
-    user_docs_indices = dict()
 
     # load tokenizer
     if os.path.exists(encode_directory + data_name + '.tkn'):
         tok = pickle.load(open(encode_directory + data_name + '.tkn', 'rb'))
     else:
-        tok = Tokenizer(num_words=20001)  # 20000 known + 1 unkown tokens
+        all_docs = []
+        with open(encode_directory + data_name + '.json') as dfile:
+            for idx, line in enumerate(dfile):
+                user_info = json.loads(line)
+                for doc in user_info['docs']:
+                    all_docs.append(doc['text'])
+
+        tok = Tokenizer(num_words=15001)  # 15000 known + 1 unknown tokens
         tok.fit_on_texts(all_docs)
         pickle.dump(tok, open(encode_directory + data_name + '.tkn', 'wb'))
+        del all_docs
 
     params = {
         'batch_size': 16,
@@ -221,21 +239,20 @@ def main(data_name, encode_directory, odirectory='../resources/'):
     with open(encode_directory + data_name + '.json') as dfile:
         for idx, line in enumerate(dfile):
             user_info = json.loads(line)
+            user_info['uid'] = str(user_info['uid'])
             if user_info['uid'] not in user_encoder:
                 user_encoder[user_info['uid']] = len(user_encoder)
             user_info['uid'] = user_encoder[user_info['uid']]
 
             user_corpus[user_info['uid']] = []
-            user_docs_indices[user_info['uid']] = []
 
             for doc in user_info['docs']:
-                processed_doc = pad_sequences(
-                    tok.texts_to_sequences([doc['text']]), maxlen=params['max_len'])[0]
-                user_corpus[user_info['uid']].append(processed_doc)
-                all_docs.append(processed_doc)
-                user_docs_indices[user_info['uid']].append(len(all_docs) - 1)
+                user_corpus[user_info['uid']].append(
+                    tok.texts_to_sequences([doc['text']])[0]
+                )
+
     # update user information
-    params['user_size'] = len(user_docs_indices) + 1
+    params['user_size'] = len(user_info) + 1
     if not os.path.exists(encode_directory + 'user_encoder.json'):
         json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))
 
@@ -243,8 +260,8 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         os.mkdir('../resources/embedding/{}/'.format(data_name))
 
     # build datasets
-    user_docs, labels = user_doc_builder(
-        user_corpus, all_docs, user_docs_indices, negative_samples=params['negative_sample']
+    user_words, labels = user_doc_builder(
+        user_corpus, tok.num_words, negative_samples=params['negative_sample'], odir=odirectory
     )
 
     # build embedding model
@@ -260,10 +277,10 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         loss = 0
 
         train_iter = user_doc_generator(
-            user_docs, labels, params['batch_size']
+            user_words, labels, params['batch_size']
         )
 
-        for step, train_batch in enumerate(train_iter):
+        for step, train_batch in tqdm(enumerate(train_iter)):
             '''user info, uw: user-word'''
             ud_pairs, ud_labels = train_batch
             ud_pairs = [np.array(x) for x in zip(*ud_pairs)]

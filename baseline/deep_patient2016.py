@@ -17,8 +17,8 @@ import os
 
 import torch
 from torch import nn as nn
-import torch.nn.functional as F
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset
+from torch.utils.data.dataloader import DataLoader
 from gensim.models import LdaModel
 import numpy as np
 from tqdm import tqdm
@@ -44,13 +44,13 @@ class AE(nn.Module):
     def forward(self, topics):
         features = self.dp(topics)
         features = self.encoder_hidden_layer(features)
-        features = F.sigmoid(features)
+        features = torch.sigmoid(features)
         code_features = self.encoder_output_layer(features)
-        code_features = F.sigmoid(code_features)
+        code_features = torch.sigmoid(code_features)
         decode_features = self.decoder_hidden_layer(code_features)
-        decode_features = F.sigmoid(decode_features)
+        decode_features = torch.sigmoid(decode_features)
         decode_features = self.decoder_output_layer(decode_features)
-        reconstructed = F.sigmoid(decode_features)
+        reconstructed = torch.sigmoid(decode_features)
         return reconstructed, code_features
 
 
@@ -147,7 +147,7 @@ class Lda2User(object):
         if not user_features:
             user_features = self.lda2user()
         if not torch.is_tensor(user_features):
-            user_features = torch.tensor(user_features)
+            user_features = torch.FloatTensor(user_features)
 
         _, user_embs = self.ae(user_features)
         user_embs = user_embs.cpu().detach().numpy()
@@ -166,7 +166,7 @@ if __name__ == '__main__':
     if not os.path.exists(task_dir):
         os.mkdir(task_dir)
 
-    odir = task_dir + 'lda2user/'
+    odir = task_dir + 'deeppatient2user/'
     if not os.path.exists(odir):
         os.mkdir(odir)
 

@@ -28,7 +28,7 @@ class RawCorpus(object):
                         yield doc_entity['text'].split()
 
 
-def train_lda(dname, raw_dir='./data/raw/', odir='./resources/embedding/'):
+def train_lda(dname, raw_dir='../data/raw/', odir='../resources/embedding/', dim=300):
     """
         The number of topics should be aligned with the dimensions of the user embedding.
     """
@@ -54,13 +54,13 @@ def train_lda(dname, raw_dir='./data/raw/', odir='./resources/embedding/'):
     #        )
     #    else:
     model = LdaMulticore(
-        doc_matrix, id2word=dictionary, num_topics=300,
+        doc_matrix, id2word=dictionary, num_topics=dim,
         passes=10, alpha='symmetric', workers=os.cpu_count()//2
     )
     model.save(odir + 'lda.model')
 
 
-def train_doc2v(dname, raw_dir='./data/raw/', odir='./resources/embedding/'):
+def train_doc2v(dname, raw_dir='../data/raw/', odir='../resources/embedding/', dim=300):
     """ Build paragraph2vec model
     """
 
@@ -82,7 +82,7 @@ def train_doc2v(dname, raw_dir='./data/raw/', odir='./resources/embedding/'):
 
     # init, train and save the model
     model = Doc2Vec(
-        vector_size=300, min_count=2, epochs=30,
+        vector_size=dim, min_count=2, epochs=30,
         workers=8, max_vocab_size=20000
     )
     model.build_vocab(corpus)
@@ -93,15 +93,16 @@ def train_doc2v(dname, raw_dir='./data/raw/', odir='./resources/embedding/'):
     )
 
     model.save(odir + 'doc2v.model')
+    return odir + 'doc2v.model'
 
 
-def train_w2v(dname, raw_dir='./data/raw/', odir='./resources/embedding/', pretrained=None):
+def train_w2v(dname, raw_dir='../data/raw/', odir='../resources/embedding/', pretrained=None, dim=300):
     dpath = raw_dir + dname + '/' + dname + '.tsv'
     corpus = RawCorpus(dpath)
     if not pretrained:
         model = Word2Vec(
             corpus, min_count=2, window=5,
-            size=300, sg=0, workers=8,
+            size=dim, sg=0, workers=8,
             max_vocab_size=20000,
         )
     else:
@@ -119,10 +120,10 @@ def train_w2v(dname, raw_dir='./data/raw/', odir='./resources/embedding/', pretr
 
 
 if __name__ == '__main__':
-    save_dir = './resources/embedding/'
+    save_dir = '../resources/embedding/'
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
-    data_dir = './data/processed_data/'
+    data_dir = '../data/processed_data/'
 
     data_name = sys.argv[1]  # ['amazon', 'diabetes', 'mimic-iii']
     model_name = sys.argv[2]  # lda, word2vec, doc2vec and bert

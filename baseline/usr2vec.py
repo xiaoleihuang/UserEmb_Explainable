@@ -247,8 +247,6 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         user_corpus, all_docs, user_docs_indices, negative_samples=params['negative_sample']
     )
 
-    # build doc embedding TODO
-
     # build embedding model
     build_emb_layer(
         tok, params['emb_path'], params['word_emb_path'], params['emb_dim']

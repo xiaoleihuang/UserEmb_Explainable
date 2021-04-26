@@ -3,6 +3,7 @@ import json
 from collections import Counter
 import pickle
 import itertools
+import sys
 
 import statsmodels.api as sm
 from nltk.tokenize import word_tokenize
@@ -13,7 +14,11 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import KFold
 from sklearn.metrics import f1_score
+
 import numpy as np
+from scipy.spatial import distance
+from scipy.stats import pearsonr
+import pandas as pd
 
 from keras.models import Sequential
 from keras.layers import Dense
@@ -108,7 +113,7 @@ def qual_concepts_sim(**kwargs):
                 for idx, tag in enumerate(labels):
                     if tag in label_set:
                         user_docs[user_entry['uid']]['label'][idx] = 1
-                if sum(user_docs[user_entry['uid']]['label']) in [0, 10]:
+                if sum(user_docs[user_entry['uid']]['label']) in [0, len(labels)]:
                     del user_docs[user_entry['uid']]
                     continue
 
@@ -146,7 +151,65 @@ def qual_concepts_sim(**kwargs):
         with open(odir + 'vectorizer_concept_{}.pkl'.format(task_name), 'wb') as wfile:
             pickle.dump(vect_concept, wfile)
 
+    # randomly sample 50 users
+    uids = list(user_docs.keys())
+    uids = np.random.choice(uids, size=50, replace=False)
+    doc_vectors = vect_doc.transform([user_docs[uid]['doc'] for uid in uids]).toarray()
+    concept_vectors = vect_concept.transform([user_docs[uid]['doc'] for uid in uids]).toarray()
+    label_vectors = np.asarray([user_docs[uid]['label'] for uid in uids])
 
+    # compare similarities between every two users, label, concept and document
+    with open(odir + 'user_sims.tsv', 'w') as wfile:
+        wfile.write('uids\tdoc_sim\tconcept_sim\tlabel_sim\n')
+        for uidx in range(len(uids)):
+            for ujdx in range(uidx+1, len(uids)):
+                wfile.write('{}\t{}\t{}\t{}\n'.format(
+                    uids[uidx]+','+uids[ujdx],
+                    distance.cosine(doc_vectors[uidx], doc_vectors[ujdx]),
+                    distance.cosine(concept_vectors[uidx], concept_vectors[ujdx]),
+                    distance.cosine(label_vectors[uidx], label_vectors[ujdx])
+                ))
+
+    user_sims = pd.read_csv(odir + 'user_sims.tsv', sep='\t')
+    with open(odir + 'user_sims.txt', 'w') as wfile:
+        doc_concept_corr = pearsonr(user_sims['doc_sim'], user_sims['concept_sim'])
+        doc_label_corr = pearsonr(user_sims['doc_sim'], user_sims['label_sim'])
+        concept_label_corr = pearsonr(user_sims['doc_sim'], user_sims['label_sim'])
+        print('doc_concept_corr: ', doc_concept_corr)
+        print('doc_label_corr: ', doc_label_corr)
+        print('concept_label_corr: ', concept_label_corr)
+        wfile.write('doc_concept_corr: {}\n'.format(doc_concept_corr))
+        wfile.write('doc_label_corr: {}\n'.format(doc_label_corr))
+        wfile.write('concept_label_corr: {}\n'.format(concept_label_corr))
+        wfile.write('\n\n')
+
+        y = user_sims['label_sim']
+        # linear regression between doc_sim and label_sim
+        x = user_sims['doc_sim']
+        x = sm.add_constant(x)
+        model = sm.OLS(y, x).fit()
+        print(model.summary())
+        wfile.write('linear regression between doc_sim and label_sim\n')
+        wfile.write(str(model.summary()))
+        wfile.write('\n')
+
+        # linear regression between concept_sim and label_sim
+        x = user_sims['concept_sim']
+        x = sm.add_constant(x)
+        model = sm.OLS(y, x).fit()
+        print(model.summary())
+        wfile.write('linear regression between concept_sim and label_sim\n')
+        wfile.write(str(model.summary()))
+        wfile.write('\n')
+
+        # linear regression between concept_sim, doc_sim and label_sim
+        x = user_sims[['doc_sim', 'concept_sim']]
+        x = sm.add_constant(x)
+        model = sm.OLS(y, x).fit()
+        print(model.summary())
+        wfile.write('linear regression between concept_sim, doc_sim and label_sim\n')
+        wfile.write(str(model.summary()))
+        wfile.write('\n')
 
 
 def dummy_func(doc):
@@ -187,6 +250,7 @@ def quant_concepts_sim(**kwargs):
     data_stats_path = kwargs['data_stats_path']
     odir = kwargs['output_dir']
     task_name = kwargs['task_name']
+    clf_name = kwargs['clf_name']
 
     concept_files = set(os.listdir(concept_dir))
     data_stats = json.load(open(data_stats_path))
@@ -261,56 +325,87 @@ def quant_concepts_sim(**kwargs):
     kf = KFold(n_splits=5)
     doc_f1 = []
     concept_f1 = []
+    both_f1 = []  # concept + doc
     for train_idx, test_idx in kf.split(uids):
         train_uids = [uids[item] for item in train_idx]
         test_uids = [uids[item] for item in test_idx]
 
-        x_train = [user_docs[item]['doc'] for item in train_uids]
-        x_test = [user_docs[item]['doc'] for item in test_uids]
+        x_train_doc = [user_docs[item]['doc'] for item in train_uids]
+        x_test_doc = [user_docs[item]['doc'] for item in test_uids]
         y_train = np.asarray([user_docs[item]['label'] for item in train_uids])
         y_test = [user_docs[item]['label'] for item in test_uids]
         y_test = np.asarray(list(itertools.chain.from_iterable(y_test)))
 
         # train and test logistic regression on documents
-        x_train = vect_doc.transform(x_train).toarray()
-        x_test = vect_doc.transform(x_test).toarray()
+        x_train_doc = vect_doc.transform(x_train_doc).toarray()
+        x_test_doc = vect_doc.transform(x_test_doc).toarray()
         # lr_model = LogisticRegressionKeras(num_class=num_label, input_dim=vect_doc.max_features)
-        # lr_model.fit(x_train, y_train, epoch_num=15)
+        # lr_model.fit(x_train_doc, y_train, epoch_num=15)
 
-        # lr_model = MultiOutputClassifier(KNeighborsClassifier(), n_jobs=-1)
-        # lr_model = MultiOutputClassifier(DecisionTreeClassifier(), n_jobs=-1)
-        lr_model = MultiOutputClassifier(MLPClassifier(
-            early_stopping=True, activation='logistic', max_iter=1000), n_jobs=-1)
-        lr_model.fit(x_train, y_train)
+        if clf_name == 'knn':
+            lr_model = MultiOutputClassifier(KNeighborsClassifier(), n_jobs=-1)
+        elif clf_name == 'dt':
+            lr_model = MultiOutputClassifier(DecisionTreeClassifier(), n_jobs=-1)
+        else:
+            lr_model = MultiOutputClassifier(MLPClassifier(
+                early_stopping=True, activation='logistic', max_iter=1000), n_jobs=-1)
+        try:
+            # add this because of the following error:
+            # ValueError: The least populated class in y has only 1 member, which is too few.
+            # The minimum number of groups for any class cannot be less than 2.
+            lr_model.fit(x_train_doc, y_train)
+        except ValueError:
+            continue
 
-        y_pred = lr_model.predict(x_test)
+        y_pred = lr_model.predict(x_test_doc)
         # y_pred = y_pred.round()
         y_pred = np.asarray(list(itertools.chain.from_iterable(y_pred)))
         doc_f1.append(f1_score(y_true=y_test, y_pred=y_pred, average='weighted'))
 
         # train and test logistic regression on concepts
-        x_train = [user_docs[item]['entity'] for item in train_uids]
-        x_test = [user_docs[item]['entity'] for item in test_uids]
-        x_train = vect_concept.transform(x_train).toarray()
-        x_test = vect_concept.transform(x_test).toarray()
+        x_train_concept = [user_docs[item]['entity'] for item in train_uids]
+        x_test_concept = [user_docs[item]['entity'] for item in test_uids]
+        x_train_concept = vect_concept.transform(x_train_concept).toarray()
+        x_test_concept = vect_concept.transform(x_test_concept).toarray()
         # lr_model = LogisticRegressionKeras(num_class=num_label, input_dim=vect_concept.max_features)
-        # lr_model.fit(x_train, y_train, epoch_num=15)
+        # lr_model.fit(x_train_concept, y_train, epoch_num=15)
 
-        # lr_model = MultiOutputClassifier(KNeighborsClassifier(), n_jobs=-1)
-        # lr_model = MultiOutputClassifier(DecisionTreeClassifier(), n_jobs=-1)
-        lr_model = MultiOutputClassifier(MLPClassifier(
-            early_stopping=True, activation='logistic', max_iter=1000), n_jobs=-1)
-        lr_model.fit(x_train, y_train)
+        if clf_name == 'knn':
+            lr_model = MultiOutputClassifier(KNeighborsClassifier(), n_jobs=-1)
+        elif clf_name == 'dt':
+            lr_model = MultiOutputClassifier(DecisionTreeClassifier(), n_jobs=-1)
+        else:
+            lr_model = MultiOutputClassifier(MLPClassifier(
+                early_stopping=True, activation='logistic', max_iter=1000), n_jobs=-1)
+        lr_model.fit(x_train_concept, y_train)
 
-        y_pred = lr_model.predict(x_test)
+        y_pred = lr_model.predict(x_test_concept)
         # y_pred = y_pred.round()
         y_pred = np.asarray(list(itertools.chain.from_iterable(y_pred)))
         concept_f1.append(f1_score(y_true=y_test, y_pred=y_pred, average='weighted'))
+
+        # concept + doc
+        x_train = np.concatenate((x_train_doc, x_train_concept), axis=1)
+        x_test = np.concatenate((x_test_doc, x_test_concept), axis=1)
+        if clf_name == 'knn':
+            lr_model = MultiOutputClassifier(KNeighborsClassifier(), n_jobs=-1)
+        elif clf_name == 'dt':
+            lr_model = MultiOutputClassifier(DecisionTreeClassifier(), n_jobs=-1)
+        else:
+            lr_model = MultiOutputClassifier(MLPClassifier(
+                early_stopping=True, activation='logistic', max_iter=1000), n_jobs=-1)
+        lr_model.fit(x_train, y_train)
+        y_pred = lr_model.predict(x_test)
+        y_pred = np.asarray(list(itertools.chain.from_iterable(y_pred)))
+        both_f1.append(f1_score(y_true=y_test, y_pred=y_pred, average='weighted'))
 
     print('Concept 5-fold F1: ', concept_f1)
     print('Concept 5-fold F1 Average: ', np.mean(concept_f1))
     print('Doc 5-fold F1: ', doc_f1)
     print('Doc 5-fold F1 Average: ', np.mean(doc_f1))
+    print('Both Doc & Concept 5-fold F1: ', both_f1)
+    print('Both Doc & Concept 5-fold F1 Average: ', np.mean(both_f1))
+
     # feature Jaccard similarities
     concept_keys = set([item.lower() for item in vect_concept.vocabulary_.keys()])
     doc_keys = set([item.lower() for item in vect_doc.vocabulary_.keys()])
@@ -321,43 +416,52 @@ def quant_concepts_sim(**kwargs):
 
 
 if __name__ == '__main__':
-    dlist = ['mimic-iii']  # 'diabetes', 'mimic-iii'
+    dname = sys.argv[1]
+    dlist = ['diabetes', 'mimic-iii']  # 'diabetes', 'mimic-iii'
+    classifier = sys.argv[2] if len(sys.argv) > 2 else 'mlp'
+    if classifier not in ['mlp', 'dt', 'knn']:
+        print('Error, {} classifier is not supported'.format(classifier))
+        sys.exit()
+    if dname not in dlist:
+        print('Error, {} is not supported'.format(dname))
+        sys.exit()
+
     output_dir = '../resources/analyze/'
     indir = './processed_data/'
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
     # generate data stats for each dataset
-    for dname in dlist:
-        data_path = indir + dname + '/{}.json'.format(dname)
-        concet_dir = indir + '{}/concepts/'.format(dname)
+    data_path = indir + dname + '/{}.json'.format(dname)
+    concet_dir = indir + '{}/concepts/'.format(dname)
 
-        concept_odir = output_dir + '{}/'.format(dname)
-        if not os.path.exists(concept_odir):
-            os.mkdir(concept_odir)
-        quant_odir = concept_odir + 'quant/'
-        if not os.path.exists(quant_odir):
-            os.mkdir(quant_odir)
-        qual_odir = concept_odir + 'qual/'
-        if not os.path.exists(qual_odir):
-            os.mkdir(qual_odir)
+    concept_odir = output_dir + '{}/'.format(dname)
+    if not os.path.exists(concept_odir):
+        os.mkdir(concept_odir)
+    quant_odir = concept_odir + 'quant/'
+    if not os.path.exists(quant_odir):
+        os.mkdir(quant_odir)
+    qual_odir = concept_odir + 'qual/'
+    if not os.path.exists(qual_odir):
+        os.mkdir(qual_odir)
 
-        # get stats of concepts
-        # concept_stats(concet_dir, concept_odir, dname)
-        # quantitative analysis
-        quant_concepts_sim(
-            corpus_path=data_path,
-            concept_dir=concet_dir,
-            data_stats_path=output_dir + '{}_stats.json'.format(dname, dname),
-            output_dir=quant_odir,
-            task_name=dname,
-        )
+    # get stats of concepts
+    # concept_stats(concet_dir, concept_odir, dname)
+    # quantitative analysis
+    quant_concepts_sim(
+        corpus_path=data_path,
+        concept_dir=concet_dir,
+        data_stats_path=output_dir + '{}_stats.json'.format(dname, dname),
+        output_dir=quant_odir,
+        task_name=dname,
+        clf_name=classifier,
+    )
 
-        # # another analysis perspective
-        # qual_concepts_sim(
-        #     corpus_path=data_path,
-        #     concept_dir=concet_dir,
-        #     data_stats_path=output_dir + '{}_stats.json'.format(dname, dname),
-        #     output_dir=quant_odir,
-        #     task_name=dname,
-        # )
+    # another analysis perspective
+    # qual_concepts_sim(
+    #     corpus_path=data_path,
+    #     concept_dir=concet_dir,
+    #     data_stats_path=output_dir + '{}_stats.json'.format(dname, dname),
+    #     output_dir=qual_odir,
+    #     task_name=dname,
+    # )

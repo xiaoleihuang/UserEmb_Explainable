@@ -137,12 +137,14 @@ def user_word_sampler(uid, sequence, vocab_size, filter_words=None, negative_sam
     labels = []
     word_set = set(sequence)
 
-    for wid in sequence:
+    sample_size = 256
+    # for wid in sequence:
+    for wid in set(sequence):  # to reduce number of training instances, rush for conference deadline
         couples.append([uid, wid])
         labels.append(1)
 
-    if len(couples) > 512:  # maximum of BERT, to ensure fair comparison
-        sample_indices = list(np.random.choice(list(range(len(labels))), size=512, replace=False))
+    if len(couples) > sample_size:  # rush for conference deadline
+        sample_indices = list(np.random.choice(list(range(len(labels))), size=sample_size, replace=False))
         couples = np.asarray(couples)
         labels = np.asarray(labels)
         couples = list(couples[sample_indices])

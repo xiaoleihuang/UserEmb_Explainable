@@ -221,7 +221,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         del all_docs
 
     params = {
-        'batch_size': 16,
+        'batch_size': 64,
         'vocab_size': tok.num_words,
         'user_size': -1,  # +1 for unknown
         'emb_dim': 300,
@@ -293,8 +293,9 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         train_iter = user_doc_generator(
             user_words, labels, params['batch_size']
         )
+        total_steps = len(labels) // params['batch_size']
 
-        for step, train_batch in enumerate(train_iter):
+        for step, train_batch in tqdm(enumerate(train_iter), total=total_steps):
             '''user info, uw: user-word'''
             ud_pairs, ud_labels = train_batch
             ud_pairs = [np.array(x, dtype=np.int32) for x in zip(*ud_pairs)]
@@ -307,6 +308,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
             if step % 100 == 0:
                 print('Epoch: {}, Step: {}'.format(epoch, step))
                 print('\tLoss: {}.'.format(loss_avg))
+                # print('Remaining Steps: ', round((step + 1) / total_steps, 2))
                 print('-------------------------------------------------')
 
     # save the model

@@ -232,7 +232,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         'word_emb_train': False,
         'user_emb_train': True,
         'user_task_weight': 1,
-        'epochs': 15,
+        'epochs': 10,
         'optimizer': 'adam',
         'lr': 1e-4,
         'negative_sample': 3,

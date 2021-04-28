@@ -1,12 +1,9 @@
 import os
-import json
 
 import keras
-
 import torch
 import torch.nn as nn
 from transformers import AutoModel
-
 import numpy as np
 
 
@@ -141,9 +138,10 @@ def build_gru_model(params=None):
     return ud_model, uc_model
 
 
-class DannGru(nn.Module):
+# Dual Neural Network
+class DNNGru(nn.Module):
     def __init__(self, params):
-        super(DannGru, self).__init__()
+        super(DNNGru, self).__init__()
         self.params = params
 
         # define user embeddings
@@ -209,9 +207,9 @@ class DannGru(nn.Module):
         return user_doc_sim, user_concept_sim
 
 
-class DannBert(nn.Module):
+class DNNBert(nn.Module):
     def __init__(self, params):
-        super(DannBert, self).__init__()
+        super(DNNBert, self).__init__()
         self.params = params
 
         # define user embeddings
@@ -224,21 +222,35 @@ class DannBert(nn.Module):
             self.uemb.reset_parameters()
             torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
 
+        self.dropout = nn.Dropout(self.params['dp_rate'])
+        # a project layer to map 768 dimensional vectors to 300 vectors
+        self.linear = nn.Linear(
+            self.bert_model.config.hidden_size, self.params['emb_dim'])
+
         # bert
         self.bert_model = AutoModel.from_pretrained(self.params['bert_name'])
 
-        # to encode words in documents
-        self.doc_encoder = nn.GRU(
-            input_size=self.wemb.embedding_dim,
-            hidden_size=self.params['emb_dim'] // 2,
-            bidirectional=self.params['bidirectional'],
-            batch_first=True,
-            dropout=self.params['dp_rate']
+    def forward(self, **kwargs):
+        input_doc_ids = kwargs['input_doc_ids']
+        input_uids4doc = kwargs['input_uids4doc']
+        input_doc_masks = kwargs['input_doc_masks']
+        input_uids4concept = kwargs['input_uids4concept']
+        input_concept_ids = kwargs['input_concept_ids']
+
+        users4doc = self.uemb(input_uids4doc)
+        users4concept = self.uemb(input_uids4concept)
+
+        doc_bert_embs = self.bert_model(
+            input_ids=input_doc_ids,
+            attention_mask=input_doc_masks,
         )
+        doc_embs = self.dropout(self.linear(doc_bert_embs[1]))
 
-        # define self attention networks
-        self.att_nn = None
-        pass
+        concept_bert_embs = self.bert_model(
+            input_ids=input_concept_ids,
+        )
+        concept_embs = self.dropout(self.linear(concept_bert_embs[1]))
 
-    def forward(self):
-        pass
+        user_doc_sims = torch.sum(users4doc * doc_embs, -1)
+        user_concept_sims = torch.sum(users4concept * concept_embs, -1)
+        return user_doc_sims, user_concept_sims

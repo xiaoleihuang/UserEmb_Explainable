@@ -3,13 +3,22 @@ import os
 import json
 import pickle
 import sys
+import datetime
+import itertools
 
+from keras_preprocessing.text import Tokenizer
 from nltk.tokenize import RegexpTokenizer
-from transformers import BertTokenizer
 import numpy as np
 from tqdm import tqdm
 import gensim
 from keras.preprocessing.sequence import pad_sequences
+
+from transformers import BertTokenizer
+from torch.utils.tensorboard import SummaryWriter
+import torch
+import torch.nn as nn
+from transformers import AdamW, get_linear_schedule_with_warmup
+
 # load data
 # load concepts
 # import model
@@ -44,44 +53,283 @@ def concept_preprocessor(concepts):
     # separate each concept by comma, because each concept
     # filter word less or equal than 3 characters
     tkn = RegexpTokenizer(r'[\w-]+')
-    pass
+    results = []
+
+    for concept in concepts:
+        items = concept.split(',')
+        if len(items) > 3:
+            continue
+
+        # only keep tokens at least three characters
+        items = [item for item in tkn.tokenize(concept) if len(item) > 2 and not item.isnumeric()]
+        if len(items) == 0:
+            continue
+        results.append(' '.join(items))
+    return results
 
 
-def build_concept_tokenizer(concepts):
-    # this will help build concept embeddings
+def build_concept_weights(params):
+    emb_path = params['emb_path']  # pretrained word embedding path
+    concepts_tkn = pickle.load(open(params['concepts_tkn_path'], 'rb'))
 
-    pass
+    # derived by pretrained embeddings
+    # support three types, bin/txt/npy
+    emb_len = len(concepts_tkn)
+    vector_size = -1
+    if emb_path.endswith('.bin'):
+        w2v_model = gensim.models.KeyedVectors.load_word2vec_format(
+            emb_path, binary=True
+        )
+        vector_size = w2v_model.vector_size
+
+    elif emb_path.endswith('.txt'):
+        w2v_model = {}
+
+        with open(emb_path) as dfile:
+            for line in dfile:
+                line = line.strip()
+                if len(line) < 10:
+                    continue
+                line = line.split()
+                word = line[0]
+                vectors = np.asarray(line[1:], dtype='float32')
+                if vector_size == -1:
+                    vector_size = len(vectors)
+                w2v_model[word] = vectors
+    else:
+        raise ValueError('Current other formats are not supported!')
+
+    emb_model = np.zeros((emb_len, vector_size))
+    for idx, concept in enumerate(concepts_tkn):
+        tokens = concept.split()
+        vector = [w2v_model[token] for token in tokens if token in w2v_model]
+        emb_model[idx] = np.mean(vector, axis=0)
+
+    # save the extracted embedding weights
+    np.save(params['concept_emb_path'], emb_model)
+    # save the extracted embedding weights
+    np.save(params['concept_emb_path'], emb_model)
 
 
-def data_loader(**kwargs):
-    user_stats_path = kwargs['user_stats_path']  # to encode users into indices
-    concept_dir = kwargs['concept_dir']
-    data_path = kwargs['data_path']
-    concept_tkn_path = kwargs['concept_tkn_path']
-    word_tkn_path = kwargs['word_tkn_path']
-    bert_tkn = BertTokenizer.from_pretrained(kwargs['bert_name'])
+def data_builder(**kwargs):
+    output_dir = kwargs['odir']
+    if os.path.exists(output_dir + 'user_docs_concepts.pkl'):
+        loaded_data = pickle.load(open(output_dir + 'user_docs_concepts.pkl', 'rb'))
+        return loaded_data[0], loaded_data[1]  # user_corpus, all_docs
+    else:
+        user_corpus = dict()
+        all_docs = []
+        concepts_info = dict()  # will store concept count and index pair.
 
-    # load dataset
-    with open(data_path) as dfile:
-        for line in dfile:
-            user_entity = json.loads(line)
+        user_stats_path = kwargs['user_stats_path']  # to encode users into indices
+        user_encoder = json.load(open(user_stats_path))
+        concept_files = os.listdir(kwargs['concept_dir'])
 
-    # load concepts
+        # load dataset
+        with open(kwargs['data_path']) as dfile:
+            for line in tqdm(dfile):
+                user_entity = json.loads(line)
 
-    pass
+                if user_entity['uid'] not in user_corpus:
+                    user_corpus[user_entity['uid']] = {
+                        'uidx': user_encoder(user_entity['uid']),
+                        'docs': [],
+                        'concepts': [],
+                    }
+
+                uid = user_entity['uid'].split('-')[0]
+                for doc_entity in user_entity['docs']:
+                    snippets = split_docs(
+                        doc_entity['text'], max_len=kwargs['max_len'])
+                    for snippet in snippets:
+                        all_docs.append(snippet)
+                        # record the snippet index
+                        user_corpus[user_entity['uid']]['docs'].append(len(all_docs)-1)
+
+                    did = doc_entity['doc_id']
+                    concept_fname = '{}_{}.pkl'.format(uid, did)
+
+                    if concept_fname in concept_files:
+                        concepts = pickle.load(open(kwargs['concept_dir'] + concept_fname, 'rb'))
+                        # filter out low confident medical concepts
+                        concepts = [item['preferred_name'] for item in concepts if item['score'] > 3.6]
+                        # concepts = [item['preferred_name'] for item in concepts]
+                        concepts = concept_preprocessor(concepts)
+                        for concept in concepts:
+                            if concept not in concepts_info:
+                                concepts_info[concept] = 0
+                            concepts_info[concept] += 1
+
+                        user_corpus[user_entity['uid']]['concepts'].append(concepts)
+                    else:
+                        user_corpus[user_entity['uid']]['concepts'].append([])
+
+        # sort the concepts info, by its count
+        concepts_tkn = list(sorted(
+            concepts_info.items(),
+            key=lambda item: item[1],
+            reverse=True
+        ))[:kwargs['vocab_size']]
+        # map concepts to indices
+        concepts_tkn = dict(zip(
+            [item[0] for item in concepts_tkn],
+            range(len(concepts_tkn))
+        ))
+        with open(kwargs['concept_tkn_path'], 'wb') as wfile:
+            pickle.dump(concepts_tkn, wfile)
+
+        if not os.path.exists(kwargs['word_tkn_path']):
+            # 15000 known + 1 unknown tokens
+            # default value for this work is 15000
+            keras_tkn = Tokenizer(num_words=kwargs['vocab_size']+1)
+            keras_tkn.fit_on_texts(all_docs)
+            pickle.dump(keras_tkn, open(kwargs['word_tkn_path'], 'wb'))
+
+        with open(output_dir + 'user_docs_concepts.pkl', 'wb') as wfile:
+            pickle.dump([user_corpus, all_docs], wfile)
+        return user_corpus, all_docs
+
+
+def user_doc_builder(user_docs, all_docs, params):
+    max_len = params['max_len']
+    concept_tkn = pickle.load(open(params['concept_tkn_path'], 'rb'))
+
+    if params['method'] == 'caue_gru':
+        tokenizer = pickle.load(open(params['word_tkn_path'], 'rb'))
+    else:
+        tokenizer = BertTokenizer.from_pretrained(params['bert_name'])
+
+    if params['method'] == 'caue_gru':
+        # GRU tokenizer
+        all_docs = pad_sequences(
+            tokenizer.texts_to_sequences(all_docs),
+            maxlen=params['max_len']
+        )
+    else:
+        # BERT tokenizer
+        all_docs = [tokenizer.encode_plus(
+            doc_item, padding='max_length', max_length=max_len,
+            return_tensors='pt', return_token_type_ids=False,
+            truncation=True,
+        )['input_ids'][0] for doc_item in all_docs]
+
+    process = tqdm(list(user_docs.keys()))
+    uids_docs = []
+    docs = []
+    uids_concepts = []
+    concepts = []
+    ud_labels = []
+    uc_labels = []
+
+#
+    for uid in process:
+        sample_doc_space = [idx for idx in range(len(all_docs)) if idx not in user_docs[uid]['docs']]
+        user_concepts = set(list(itertools.chain.from_iterable(user_docs[uid]['concepts'])))
+        sample_concept_space = [key for key in concept_tkn if key not in user_concepts]
+
+        for step, doc_idx in enumerate(user_docs[uid]['docs']):
+            # documents
+            docs.append(all_docs[doc_idx])
+            ud_labels.append(1)
+            uids_docs.extend(uid)
+
+            # concepts
+            if len(user_docs[uid]['concepts'][step]) > params['concept_sample_size']:
+                select_concepts = np.random.choice(
+                    user_docs[uid]['concepts'][step], size=params['concept_sample_size'], replace=False)
+            else:
+                select_concepts = user_docs[uid]['concepts'][step]
+
+            concepts.extend(select_concepts)
+            uc_labels.extend([1] * len(select_concepts))
+            uids_concepts.extend([uid] * len(select_concepts))
+
+            # generate negative samples for concepts
+            sample_concepts = np.random.choice(
+                sample_concept_space, size=params['negative_sample'] * len(select_concepts), replace=False
+            )
+            concepts.extend(sample_concepts)
+            uc_labels.extend([0] * len(sample_concepts))
+            uids_concepts.extend([uid] * len(sample_concepts))
+
+        sample_docs = np.random.choice(
+            sample_doc_space, size=params['negative_sample'] * len(user_docs[uid]['docs']), replace=False
+        )
+        docs.extend([all_docs[doc_idx] for doc_idx in sample_docs])
+        ud_labels.extend([0] * len(sample_docs))
+        uids_docs.extend([uid] * len(sample_docs))
+
+    # encode the concepts into indices
+    if params['method'] == 'caue_gru':
+        concepts = [
+            concept_tkn[concept] for concept in concepts
+        ]
+    else:
+        concepts = [
+            tokenizer.encode_plus(
+                concept, padding='max_length', max_length=5,
+                return_tensors='pt', return_token_type_ids=False,
+                truncation=True,
+            )['input_ids'][0] for concept in concepts
+        ]
+
+    # if use torch version, we have to convert them into tensors
+    if not params['use_keras']:
+        uids_docs = torch.tensor(uids_docs)
+        # docs = torch.tensor(docs, dtype=torch.long)
+        docs = torch.stack(docs)
+        ud_labels = torch.tensor(ud_labels, dtype=torch.float)
+
+        if params['method'] == 'caue_gru':
+            concepts = torch.tensor(concepts)
+        else:
+            concepts = torch.stack(concepts)
+        uids_concepts = torch.tensor(uids_concepts)
+        uc_labels = torch.tensor(ud_labels, dtype=torch.float)
+
+    return uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels
+
+
+def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, batch_size):
+    # TODO
+    # shuffle the dataset
+    rand_indices = torch.randperm(labels.shape[0])
+    uids = uids[rand_indices]
+    docs = docs[rand_indices]
+    concepts = concepts[rand_indices]
+    labels = labels[rand_indices]
+
+    steps = len(labels) // batch_size
+    if len(labels) % batch_size != 0:
+        steps += 1
+
+    for idx in range(steps):
+        yield docs[batch_size * idx: batch_size * (idx + 1)], \
+              uids[batch_size * idx: batch_size * (idx + 1)], \
+              concepts[batch_size * idx: batch_size * (idx + 1)], \
+              labels[batch_size * idx: batch_size * (idx + 1)]
 
 
 def main(params):
+    log_dir = params['odir'] + 'log/'
+    writer = SummaryWriter(log_dir=log_dir)
+    record_name = datetime.datetime.now().strftime('%H:%M:%S %m-%d-%Y')
+    device = torch.device(params['device'])
+
+    user_corpus = data_builder(**params)
+    # TODO
     pass
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process model parameters.')
-    parser.add_argument('--method', type=str, help='GRU or BERT')
+    parser.add_argument('--method', type=str, help='caue_gru or caue_bert')
     parser.add_argument('--dname', type=str, help='The data\'s name')
+    parser.add_argument('--use_concept', type=bool, help='If use concept as additional features', default=True)
+    parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=True)
     parser.add_argument('--lr', type=float, help='Learning rate', default=.0001)
     parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=1)
-    parser.add_argument('--batch_size', type=int, help='Batch size', default=16)
+    parser.add_argument('--batch_size', type=int, help='Batch size', default=32)
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)
     parser.add_argument('--device', type=str, help='cpu or cuda')
@@ -106,11 +354,13 @@ if __name__ == '__main__':
     parameters = {
         'batch_size': 32,
         'user_size': -1,
-        'word_emb_path': './resources/embedding/{}/word_emb.npy'.format(args.dname),
-        'user_emb_path': './resources/embedding/{}/user_emb.npy'.format(args.dname),
+        'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
+        'word_emb_path': odir + 'word_emb.npy'.format(args.dname),
+        'user_emb_path': odir + 'user_emb.npy'.format(args.dname),
+        'concept_emb_path': odir + 'concept_emb.npy'.format(args.dname),
         'user_task_weight': 1,
         'concept_task_weight': 1,
-        'epochs': 15,
+        'epochs': 10,
         'optimizer': 'adam',
         'lr': args.lr,
         'negative_sample': args.ng_num,
@@ -126,6 +376,12 @@ if __name__ == '__main__':
         'dname': args.dname,
         'encode_dir': data_dir,
         'odir': odir,
-        'device': args.device
+        'device': args.device,
+        'vocab_size': 15000,
+        'concept_tkn_path': data_dir + 'concept_tkn.pkl',
+        'word_tkn_path': data_dir + 'word_tkn.pkl',
+        'concept_sample_size': 10,  # to sample the number per document for training, prevent too many
+        'use_concept': args.use_concept,
+        'use_keras': args.use_keras,
     }
     pass

@@ -209,7 +209,7 @@ class CAUEgru(nn.Module):
 
 class CAUEBert(nn.Module):
     def __init__(self, params):
-        super(DNNBert, self).__init__()
+        super(CAUEBert, self).__init__()
         self.params = params
 
         # define user embeddings

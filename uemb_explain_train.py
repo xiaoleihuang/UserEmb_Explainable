@@ -340,12 +340,11 @@ def main(params):
     else:
         caue_model = CAUEBert(params)
 
-    # training steps by Keras
-    if params['method'] == 'caue_gru' and params['use_keras']:
+    # training settings
+    if params['method'] == 'caue_gru' and params['use_keras']:  # Keras Implementation
         optimizer = None
         scheduler = None
-        # TODO
-        pass
+        criterion = None
     else:  # Pytorch Implementation
         criterion = nn.BCEWithLogitsLoss().to(device)
         if params['method'] == 'caue_gru':
@@ -353,9 +352,9 @@ def main(params):
             scheduler = None  # no needs to adjust lr for the rmsprop
         else:
             optimize_parameters = [
-                {'params': [p for n, p in caue_model.named_parameters() if not ('bert_model' in n)],
+                {'params': [p for n, p in caue_model.named_parameters() if ('bert_model' not in n) and p.requires_grad],
                  'weight_decay_rate': params['decay_rate']},
-                {'params': [p for n, p in caue_model.named_parameters() if 'bert_model' in n],
+                {'params': [p for n, p in caue_model.named_parameters() if 'bert_model' in n or (not p.requires_grad)],
                  'weight_decay_rate': 0.0}
             ]
             optimizer = AdamW(optimize_parameters, lr=params['lr'])
@@ -380,13 +379,65 @@ def main(params):
             if not params['use_keras']:
                 optimizer.zero_grad()
                 train_batch = tuple(t.to(device) for t in train_batch)
-                uids_docs_batch, docs_batch, ud_labels_batch, uids_concepts_batch, concepts_batch, uc_labels_batch = \
-                    train_batch
 
             '''Train'''
-            
-    # TODO
-    pass
+            uids_docs_batch, docs_batch, ud_labels_batch, uids_concepts_batch, concepts_batch, uc_labels_batch = \
+                train_batch
+
+            # training for the keras
+            if params['use_keras'] and params['method'] == 'caue_gru':
+                train_loss += caue_model[0].train_on_batch(
+                    x=[uids_docs_batch, docs_batch],
+                    y=ud_labels_batch,
+                    sample_weight=[params['doc_task_weight'] * len(ud_labels_batch)]
+                )
+                train_loss += caue_model[1].train_on_batch(
+                    x=[uids_concepts_batch, concepts_batch],
+                    y=uc_labels_batch,
+                    sample_weight=[params['concept_task_weight'] * len(uc_labels_batch)]
+                )
+            else:
+                output_doc, output_concept = caue_model(**{
+                    'input1_uids': uids_docs_batch,
+                    'input_doc_ids': docs_batch,
+                    'input2_uids': uids_concepts_batch,
+                    'input_concept_ids': concepts_batch
+                })
+                loss_doc = criterion(output_doc, ud_labels_batch)
+                loss_concept = criterion(output_concept, uc_labels_batch)
+                loss = loss_doc * params['doc_task_weight'] + loss_concept * params['concept_task_weight']
+                train_loss += loss.item()
+                loss.backward()
+
+                optimizer.step()
+                if scheduler:  # this only applies for the BERT model
+                    scheduler.step()
+
+            train_loss_avg = train_loss / (step + 1)
+            writer.add_scalar(
+                'Loss/train - {}'.format(record_name),
+                train_loss_avg,
+                step + (len(uids_docs_batch) // params['batch_size']) * epoch
+            )
+            if step % 100 == 0:
+                print('Epoch: {}, Step: {}'.format(epoch, step))
+                print('\t Loss: {}.'.format(train_loss_avg))
+                print('-------------------------------------------------')
+
+        # save the user embedding and the model
+        if params['use_keras'] and params['method'] == 'caue_gru':
+            caue_model.save(params['odir'] + '{}.model'.format(params['method']))
+            np.save(
+                params['odir'] + 'user_{}.npy'.format(epoch),
+                caue_model[0].get_layer(name='user_emb').get_weights()[0]
+            )
+        else:
+            torch.save(caue_model, params['odir'] + '{}.pth'.format(params['method']))
+            np.save(
+                params['odir'] + 'user_{}.npy'.format(epoch),
+                caue_model.uemb.to('cpu').weight.detach().numpy()
+            )
+    writer.close()
 
 
 if __name__ == '__main__':
@@ -426,7 +477,7 @@ if __name__ == '__main__':
         'word_emb_path': odir + 'word_emb.npy'.format(args.dname),
         'user_emb_path': odir + 'user_emb.npy'.format(args.dname),
         'concept_emb_path': odir + 'concept_emb.npy'.format(args.dname),
-        'user_task_weight': 1,
+        'doc_task_weight': 1,
         'concept_task_weight': 1,
         'epochs': 10,
         'optimizer': 'adam',
@@ -452,4 +503,4 @@ if __name__ == '__main__':
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
     }
-    pass
+    main(parameters)

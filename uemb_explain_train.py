@@ -290,24 +290,36 @@ def user_doc_builder(user_docs, all_docs, params):
     return uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels
 
 
-def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, batch_size):
-    # TODO
+def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, params):
+    concept_batch_size = params['batch_size'] * (len(concepts) // len(docs))
     # shuffle the dataset
-    rand_indices = torch.randperm(labels.shape[0])
-    uids = uids[rand_indices]
-    docs = docs[rand_indices]
-    concepts = concepts[rand_indices]
-    labels = labels[rand_indices]
+    if params['methods'] == 'caue_bert' or not params['use_keras']:
+        rand_indices_doc = torch.randperm(ud_labels.shape[0])
+        rand_indices_concept = torch.randperm(uc_labels.shape[0])
+    else:
+        rand_indices_doc = list(range(len(ud_labels)))
+        rand_indices_concept = list(range(len(uc_labels)))
+        np.random.shuffle(rand_indices_doc)
+        np.random.shuffle(rand_indices_concept)
 
-    steps = len(labels) // batch_size
-    if len(labels) % batch_size != 0:
+    uids_docs = uids_docs[rand_indices_doc]
+    docs = docs[rand_indices_doc]
+    ud_labels = ud_labels[rand_indices_doc]
+    uids_concepts = uids_concepts[rand_indices_concept]
+    concepts = concepts[rand_indices_concept]
+    uc_labels = uc_labels[rand_indices_concept]
+
+    steps = len(ud_labels) // params['batch_size']
+    if len(ud_labels) % params['batch_size'] != 0:
         steps += 1
 
     for idx in range(steps):
-        yield docs[batch_size * idx: batch_size * (idx + 1)], \
-              uids[batch_size * idx: batch_size * (idx + 1)], \
-              concepts[batch_size * idx: batch_size * (idx + 1)], \
-              labels[batch_size * idx: batch_size * (idx + 1)]
+        yield uids_docs[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
+            docs[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
+            ud_labels[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
+            uids_concepts[concept_batch_size * idx: concept_batch_size * (idx + 1)], \
+            concepts[concept_batch_size * idx: concept_batch_size * (idx + 1)], \
+            uc_labels[concept_batch_size * idx: concept_batch_size * (idx + 1)]
 
 
 def main(params):

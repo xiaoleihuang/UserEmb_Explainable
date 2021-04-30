@@ -19,10 +19,7 @@ import torch
 import torch.nn as nn
 from transformers import AdamW, get_linear_schedule_with_warmup
 
-# load data
-# load concepts
-# import model
-# train model
+from uemb_explain_model import build_gru_model, CAUEgru, CAUEBert
 
 
 # because some documents can be extremely long
@@ -328,7 +325,66 @@ def main(params):
     record_name = datetime.datetime.now().strftime('%H:%M:%S %m-%d-%Y')
     device = torch.device(params['device'])
 
-    user_corpus = data_builder(**params)
+    print('Loading Dataset...')
+    user_corpus, all_docs = data_builder(**params)
+    print('Building Dataset...')
+    uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels = user_doc_builder(user_corpus, all_docs, params)
+    print(params)
+
+    print('Building models...')
+    if params['method'] == 'caue_gru':
+        if params['use_keras']:
+            caue_model = build_gru_model(params)
+        else:
+            caue_model = CAUEgru(params)
+    else:
+        caue_model = CAUEBert(params)
+
+    # training steps by Keras
+    if params['method'] == 'caue_gru' and params['use_keras']:
+        optimizer = None
+        scheduler = None
+        # TODO
+        pass
+    else:  # Pytorch Implementation
+        criterion = nn.BCEWithLogitsLoss().to(device)
+        if params['method'] == 'caue_gru':
+            optimizer = torch.optim.RMSprop(caue_model.parameters(), lr=params['lr'])
+            scheduler = None  # no needs to adjust lr for the rmsprop
+        else:
+            optimize_parameters = [
+                {'params': [p for n, p in caue_model.named_parameters() if not ('bert_model' in n)],
+                 'weight_decay_rate': params['decay_rate']},
+                {'params': [p for n, p in caue_model.named_parameters() if 'bert_model' in n],
+                 'weight_decay_rate': 0.0}
+            ]
+            optimizer = AdamW(optimize_parameters, lr=params['lr'])
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer, num_warmup_steps=params['warm_steps'],
+                num_training_steps=params['batch_size'] * params['epochs']
+            )
+        if 'cuda' in params['device']:
+            caue_model.cuda()
+
+    print('Starting to train...')
+    for epoch in range(params['epochs']):
+        print('Epoch: {} '.format(epoch))
+        train_loss = 0
+        if not params['use_keras']:
+            caue_model.train()
+
+        train_iter = user_doc_generator(
+            uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, params)
+
+        for step, train_batch in enumerate(tqdm(train_iter)):
+            if not params['use_keras']:
+                optimizer.zero_grad()
+                train_batch = tuple(t.to(device) for t in train_batch)
+                uids_docs_batch, docs_batch, ud_labels_batch, uids_concepts_batch, concepts_batch, uc_labels_batch = \
+                    train_batch
+
+            '''Train'''
+            
     # TODO
     pass
 

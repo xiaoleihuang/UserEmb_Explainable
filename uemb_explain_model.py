@@ -139,9 +139,9 @@ def build_gru_model(params=None):
 
 
 # Dual Neural Network
-class DNNGru(nn.Module):
+class CAUEgru(nn.Module):
     def __init__(self, params):
-        super(DNNGru, self).__init__()
+        super(CAUEgru, self).__init__()
         self.params = params
 
         # define user embeddings
@@ -207,7 +207,7 @@ class DNNGru(nn.Module):
         return user_doc_sim, user_concept_sim
 
 
-class DNNBert(nn.Module):
+class CAUEBert(nn.Module):
     def __init__(self, params):
         super(DNNBert, self).__init__()
         self.params = params

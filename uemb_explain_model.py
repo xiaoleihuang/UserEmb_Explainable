@@ -48,13 +48,13 @@ def build_gru_model(params=None):
     if os.path.exists(params['word_emb_path']):
         weights = np.load(params['word_emb_path'])
         word_emb = keras.layers.Embedding(
-            params['vocab_size'], weights.shape[1],
+            params['vocab_size']+1, weights.shape[1],
             weights=[weights],
             trainable=params['word_emb_train'], name='word_emb'
         )
     else:
         word_emb = keras.layers.Embedding(
-            params['vocab_size'], params['emb_dim'],
+            params['vocab_size']+1, params['emb_dim'],
             trainable=params['word_emb_train'], name='word_emb'
         )
 
@@ -161,7 +161,7 @@ class CAUEgru(nn.Module):
             self.wemb.requires_grad_(requires_grad=False)  # freeze the weight update
         else:
             self.wemb = nn.Embedding(
-                self.params['vocab_size'], self.params['emb_dim']
+                self.params['vocab_size']+1, self.params['emb_dim']
             )
             torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
 
@@ -190,15 +190,15 @@ class CAUEgru(nn.Module):
 
     def forward(self, **kwargs):
         input_doc_ids = kwargs['input_doc_ids']
-        input1_uids = kwargs['input1_uids']
+        input1_uids = kwargs['input_uids4doc']
         users1 = self.uemb(input1_uids)
         doc_embs = self.wemb(input_doc_ids)
-        _, gru_embs = self.gru(doc_embs)
+        _, gru_embs = self.doc_encoder(doc_embs)
         gru_embs = torch.cat((gru_embs[0, :, :], gru_embs[1, :, :]), -1)
         # dot product between user and docs
         user_doc_sim = torch.sum(users1 * gru_embs, -1)
 
-        input2_uids = kwargs['input2_uids']
+        input2_uids = kwargs['input_uids4concept']
         input_concept_ids = kwargs['input_concept_ids']
         users2 = self.uemb(input2_uids)
         concept_embs = self.cemb(input_concept_ids)
@@ -222,33 +222,27 @@ class CAUEBert(nn.Module):
             self.uemb.reset_parameters()
             torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
 
+        # bert
+        self.bert_model = AutoModel.from_pretrained(self.params['bert_name'])
+
         self.dropout = nn.Dropout(self.params['dp_rate'])
         # a project layer to map 768 dimensional vectors to 300 vectors
         self.linear = nn.Linear(
             self.bert_model.config.hidden_size, self.params['emb_dim'])
 
-        # bert
-        self.bert_model = AutoModel.from_pretrained(self.params['bert_name'])
-
     def forward(self, **kwargs):
         input_doc_ids = kwargs['input_doc_ids']
         input_uids4doc = kwargs['input_uids4doc']
-        input_doc_masks = kwargs['input_doc_masks']
         input_uids4concept = kwargs['input_uids4concept']
         input_concept_ids = kwargs['input_concept_ids']
 
         users4doc = self.uemb(input_uids4doc)
         users4concept = self.uemb(input_uids4concept)
 
-        doc_bert_embs = self.bert_model(
-            input_ids=input_doc_ids,
-            attention_mask=input_doc_masks,
-        )
+        doc_bert_embs = self.bert_model(input_ids=input_doc_ids)
         doc_embs = self.dropout(self.linear(doc_bert_embs[1]))
 
-        concept_bert_embs = self.bert_model(
-            input_ids=input_concept_ids,
-        )
+        concept_bert_embs = self.bert_model(input_ids=input_concept_ids)
         concept_embs = self.dropout(self.linear(concept_bert_embs[1]))
 
         user_doc_sims = torch.sum(users4doc * doc_embs, -1)

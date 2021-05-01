@@ -108,6 +108,49 @@ def build_concept_weights(params):
     np.save(params['concept_emb_path'], emb_model)
 
 
+def build_emb_weights(tokenizer, emb_path, save_path):
+    """"""
+    # support three types, bin/txt/npy
+    emb_len = len(tokenizer.word_index)
+    if emb_len > tokenizer.num_words:
+        emb_len = tokenizer.num_words
+
+    if emb_path.endswith('.bin'):
+        w2v_model = gensim.models.KeyedVectors.load_word2vec_format(
+            emb_path, binary=True
+        )
+        emb_model = np.zeros((emb_len, w2v_model.vector_size))
+        for pair in zip(w2v_model.index2word, w2v_model.vectors):
+            if pair[0] in tokenizer.word_index and \
+                    tokenizer.word_index[pair[0]] < tokenizer.num_words:
+                emb_model[tokenizer.word_index[pair[0]]] = pair[1]
+
+        # save the extracted embedding weights
+        np.save(save_path, emb_model)
+
+    elif emb_path.endswith('.txt'):
+        line = open(emb_path).readline()
+        emb_model = np.zeros((emb_len, len(line.strip().split())-1))  # first one is a word not vector.
+        emb_dim = len(line.strip().split()) - 1
+
+        with open(emb_path) as dfile:
+            for line in dfile:
+                line = line.strip().split()
+                word = line[0]
+                vectors = np.asarray(line[1:], dtype='float32')
+                if len(vectors) != emb_dim:
+                    continue
+
+                if word in tokenizer.word_index and \
+                        tokenizer.word_index[word] < tokenizer.num_words:
+                    emb_model[tokenizer.word_index[word]] = vectors
+
+        # save the extracted embedding weights
+        np.save(save_path, emb_model)
+    else:
+        raise ValueError('Current other formats are not supported!')
+
+
 def data_builder(**kwargs):
     output_dir = kwargs['odir']
     if os.path.exists(output_dir + 'user_docs_concepts.pkl'):
@@ -123,13 +166,13 @@ def data_builder(**kwargs):
         concept_files = os.listdir(kwargs['concept_dir'])
 
         # load dataset
-        with open(kwargs['data_path']) as dfile:
+        with open(kwargs['data_dir'] + '{}.json'.format(kwargs['dname'])) as dfile:
             for line in tqdm(dfile):
                 user_entity = json.loads(line)
 
                 if user_entity['uid'] not in user_corpus:
                     user_corpus[user_entity['uid']] = {
-                        'uidx': user_encoder(user_entity['uid']),
+                        'uidx': user_encoder[user_entity['uid']],
                         'docs': [],
                         'concepts': [],
                     }
@@ -142,6 +185,7 @@ def data_builder(**kwargs):
                         all_docs.append(snippet)
                         # record the snippet index
                         user_corpus[user_entity['uid']]['docs'].append(len(all_docs)-1)
+                        user_corpus[user_entity['uid']]['concepts'].append([])
 
                     did = doc_entity['doc_id']
                     concept_fname = '{}_{}.pkl'.format(uid, did)
@@ -149,7 +193,7 @@ def data_builder(**kwargs):
                     if concept_fname in concept_files:
                         concepts = pickle.load(open(kwargs['concept_dir'] + concept_fname, 'rb'))
                         # filter out low confident medical concepts
-                        concepts = [item['preferred_name'] for item in concepts if item['score'] > 3.6]
+                        concepts = [item['preferred_name'] for item in concepts if float(item['score']) > 3.6]
                         # concepts = [item['preferred_name'] for item in concepts]
                         concepts = concept_preprocessor(concepts)
                         for concept in concepts:
@@ -181,6 +225,10 @@ def data_builder(**kwargs):
             keras_tkn = Tokenizer(num_words=kwargs['vocab_size']+1)
             keras_tkn.fit_on_texts(all_docs)
             pickle.dump(keras_tkn, open(kwargs['word_tkn_path'], 'wb'))
+        else:
+            keras_tkn = pickle.load(open(kwargs['word_tkn_path'], 'rb'))
+        build_emb_weights(
+            keras_tkn, kwargs['emb_path'], kwargs['word_emb_path'])
 
         with open(output_dir + 'user_docs_concepts.pkl', 'wb') as wfile:
             pickle.dump([user_corpus, all_docs], wfile)
@@ -190,6 +238,8 @@ def data_builder(**kwargs):
 def user_doc_builder(user_docs, all_docs, params):
     max_len = params['max_len']
     concept_tkn = pickle.load(open(params['concept_tkn_path'], 'rb'))
+    params['concept_size'] = len(concept_tkn)
+    user_encoder = json.load(open(params['user_stats_path']))
 
     if params['method'] == 'caue_gru':
         tokenizer = pickle.load(open(params['word_tkn_path'], 'rb'))
@@ -202,6 +252,8 @@ def user_doc_builder(user_docs, all_docs, params):
             tokenizer.texts_to_sequences(all_docs),
             maxlen=params['max_len']
         )
+        if not params['use_keras']:
+            all_docs = torch.tensor(all_docs)
     else:
         # BERT tokenizer
         all_docs = [tokenizer.encode_plus(
@@ -228,9 +280,12 @@ def user_doc_builder(user_docs, all_docs, params):
             # documents
             docs.append(all_docs[doc_idx])
             ud_labels.append(1)
-            uids_docs.extend(uid)
+            uids_docs.append(user_encoder[uid])
 
             # concepts
+            if len(user_docs[uid]['concepts'][step]) == 0:
+                continue
+
             if len(user_docs[uid]['concepts'][step]) > params['concept_sample_size']:
                 select_concepts = np.random.choice(
                     user_docs[uid]['concepts'][step], size=params['concept_sample_size'], replace=False)
@@ -239,7 +294,7 @@ def user_doc_builder(user_docs, all_docs, params):
 
             concepts.extend(select_concepts)
             uc_labels.extend([1] * len(select_concepts))
-            uids_concepts.extend([uid] * len(select_concepts))
+            uids_concepts.extend([user_encoder[uid]] * len(select_concepts))
 
             # generate negative samples for concepts
             sample_concepts = np.random.choice(
@@ -247,14 +302,14 @@ def user_doc_builder(user_docs, all_docs, params):
             )
             concepts.extend(sample_concepts)
             uc_labels.extend([0] * len(sample_concepts))
-            uids_concepts.extend([uid] * len(sample_concepts))
+            uids_concepts.extend([user_encoder[uid]] * len(sample_concepts))
 
         sample_docs = np.random.choice(
             sample_doc_space, size=params['negative_sample'] * len(user_docs[uid]['docs']), replace=False
         )
         docs.extend([all_docs[doc_idx] for doc_idx in sample_docs])
         ud_labels.extend([0] * len(sample_docs))
-        uids_docs.extend([uid] * len(sample_docs))
+        uids_docs.extend([user_encoder[uid]] * len(sample_docs))
 
     # encode the concepts into indices
     if params['method'] == 'caue_gru':
@@ -290,7 +345,7 @@ def user_doc_builder(user_docs, all_docs, params):
 def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, params):
     concept_batch_size = params['batch_size'] * (len(concepts) // len(docs))
     # shuffle the dataset
-    if params['methods'] == 'caue_bert' or not params['use_keras']:
+    if params['method'] == 'caue_bert' or not params['use_keras']:
         rand_indices_doc = torch.randperm(ud_labels.shape[0])
         rand_indices_concept = torch.randperm(uc_labels.shape[0])
     else:
@@ -324,6 +379,9 @@ def main(params):
     writer = SummaryWriter(log_dir=log_dir)
     record_name = datetime.datetime.now().strftime('%H:%M:%S %m-%d-%Y')
     device = torch.device(params['device'])
+    params['user_size'] = len(
+        json.load(open(params['user_stats_path']))
+    )
 
     print('Loading Dataset...')
     user_corpus, all_docs = data_builder(**params)
@@ -376,31 +434,36 @@ def main(params):
             uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, params)
 
         for step, train_batch in enumerate(tqdm(train_iter)):
-            if not params['use_keras']:
-                optimizer.zero_grad()
-                train_batch = tuple(t.to(device) for t in train_batch)
-
             '''Train'''
             uids_docs_batch, docs_batch, ud_labels_batch, uids_concepts_batch, concepts_batch, uc_labels_batch = \
                 train_batch
-
             # training for the keras
             if params['use_keras'] and params['method'] == 'caue_gru':
-                train_loss += caue_model[0].train_on_batch(
+                loss_doc = caue_model[0].train_on_batch(
                     x=[uids_docs_batch, docs_batch],
                     y=ud_labels_batch,
                     sample_weight=[params['doc_task_weight'] * len(ud_labels_batch)]
                 )
-                train_loss += caue_model[1].train_on_batch(
+                train_loss += loss_doc
+                loss_concept = caue_model[1].train_on_batch(
                     x=[uids_concepts_batch, concepts_batch],
                     y=uc_labels_batch,
                     sample_weight=[params['concept_task_weight'] * len(uc_labels_batch)]
                 )
+                train_loss += loss_concept
             else:
+                uids_docs_batch = uids_docs_batch.to(device)
+                docs_batch = docs_batch.to(device).long()
+                ud_labels_batch = ud_labels_batch.to(device)
+                uids_concepts_batch = uids_concepts_batch.to(device)
+                concepts_batch = concepts_batch.to(device).long()
+                uc_labels_batch = uc_labels_batch.to(device)
+
+                optimizer.zero_grad()
                 output_doc, output_concept = caue_model(**{
-                    'input1_uids': uids_docs_batch,
+                    'input_uids4doc': uids_docs_batch,
                     'input_doc_ids': docs_batch,
-                    'input2_uids': uids_concepts_batch,
+                    'input_uids4concept': uids_concepts_batch,
                     'input_concept_ids': concepts_batch
                 })
                 loss_doc = criterion(output_doc, ud_labels_batch)
@@ -419,7 +482,7 @@ def main(params):
                 train_loss_avg,
                 step + (len(uids_docs_batch) // params['batch_size']) * epoch
             )
-            if step % 100 == 0:
+            if step % 200 == 0:
                 print('Epoch: {}, Step: {}'.format(epoch, step))
                 print('\t Loss: {}.'.format(train_loss_avg))
                 print('-------------------------------------------------')
@@ -435,7 +498,7 @@ def main(params):
             torch.save(caue_model, params['odir'] + '{}.pth'.format(params['method']))
             np.save(
                 params['odir'] + 'user_{}.npy'.format(epoch),
-                caue_model.uemb.to('cpu').weight.detach().numpy()
+                caue_model.uemb.weight.cpu().detach().numpy()
             )
     writer.close()
 
@@ -445,7 +508,7 @@ if __name__ == '__main__':
     parser.add_argument('--method', type=str, help='caue_gru or caue_bert')
     parser.add_argument('--dname', type=str, help='The data\'s name')
     parser.add_argument('--use_concept', type=bool, help='If use concept as additional features', default=True)
-    parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=True)
+    parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=False)
     parser.add_argument('--lr', type=float, help='Learning rate', default=.0001)
     parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=1)
     parser.add_argument('--batch_size', type=int, help='Batch size', default=32)
@@ -454,7 +517,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, help='cpu or cuda')
     args = parser.parse_args()
 
-    if args.method not in ['gru2user', 'bert2user']:
+    if args.method not in ['caue_gru', 'caue_bert']:
         print('Method {} is not supported.'.format(args.method))
         sys.exit()
 
@@ -471,11 +534,19 @@ if __name__ == '__main__':
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     parameters = {
-        'batch_size': 32,
+        'method': args.method,
+        'batch_size': 16,
         'user_size': -1,
+        'dname': args.dname,
+        'data_dir': data_dir,
+        'odir': odir,
+        'user_stats_path': data_dir + 'user_encoder.json',
+        'concept_dir': data_dir + 'concepts/',
         'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
+        'word_emb_train': False,
         'word_emb_path': odir + 'word_emb.npy'.format(args.dname),
         'user_emb_path': odir + 'user_emb.npy'.format(args.dname),
+        'user_emb_train': True,
         'concept_emb_path': odir + 'concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
         'concept_task_weight': 1,
@@ -487,19 +558,17 @@ if __name__ == '__main__':
         # 'emilyalsentzer/Bio_ClinicalBERT'
         # 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12'
         # 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'
-        'bert_name': 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12',
+        'bert_name': 'emilyalsentzer/Bio_ClinicalBERT',
         'decay_rate': .9,
         'warm_steps': 33,
+        'bidirectional': True,
         'emb_dim': args.emb_dim,
         'dp_rate': .2,
-        'dname': args.dname,
-        'encode_dir': data_dir,
-        'odir': odir,
         'device': args.device,
         'vocab_size': 15000,
         'concept_tkn_path': data_dir + 'concept_tkn.pkl',
         'word_tkn_path': data_dir + 'word_tkn.pkl',
-        'concept_sample_size': 10,  # to sample the number per document for training, prevent too many
+        'concept_sample_size': 20,  # to sample the number per document for training, prevent too many
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
     }

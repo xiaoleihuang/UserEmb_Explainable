@@ -182,7 +182,7 @@ class CAUEgru(nn.Module):
             hidden_size=self.params['emb_dim'] // 2,
             bidirectional=self.params['bidirectional'],
             batch_first=True,
-            dropout=self.params['dp_rate']
+            # dropout=self.params['dp_rate']
         )
 
         # define self attention networks

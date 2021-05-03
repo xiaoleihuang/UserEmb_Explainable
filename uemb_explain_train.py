@@ -37,7 +37,7 @@ def split_docs(doc, max_len=512):
         steps += 1
 
     for idx in range(steps):
-        if idx == steps-1 and len(doc[idx: max_len * (idx + 1)]) < max_len:
+        if idx == steps - 1 and len(doc[idx: max_len * (idx + 1)]) < max_len:
             docs.append(' '.join(doc[max_len * -1:]))  # to fill the last piece with full length
         else:
             docs.append(' '.join(doc[max_len * idx: max_len * (idx + 1)]))
@@ -130,7 +130,7 @@ def build_emb_weights(tokenizer, emb_path, save_path):
 
     elif emb_path.endswith('.txt'):
         line = open(emb_path).readline()
-        emb_model = np.zeros((emb_len, len(line.strip().split())-1))  # first one is a word not vector.
+        emb_model = np.zeros((emb_len, len(line.strip().split()) - 1))  # first one is a word not vector.
         emb_dim = len(line.strip().split()) - 1
 
         with open(emb_path) as dfile:
@@ -184,7 +184,7 @@ def data_builder(**kwargs):
                     for snippet in snippets:
                         all_docs.append(snippet)
                         # record the snippet index
-                        user_corpus[user_entity['uid']]['docs'].append(len(all_docs)-1)
+                        user_corpus[user_entity['uid']]['docs'].append(len(all_docs) - 1)
                         user_corpus[user_entity['uid']]['concepts'].append([])
 
                     did = doc_entity['doc_id']
@@ -222,7 +222,7 @@ def data_builder(**kwargs):
         if not os.path.exists(kwargs['word_tkn_path']):
             # 15000 known + 1 unknown tokens
             # default value for this work is 15000
-            keras_tkn = Tokenizer(num_words=kwargs['vocab_size']+1)
+            keras_tkn = Tokenizer(num_words=kwargs['vocab_size'] + 1)
             keras_tkn.fit_on_texts(all_docs)
             pickle.dump(keras_tkn, open(kwargs['word_tkn_path'], 'wb'))
         else:
@@ -270,7 +270,7 @@ def user_doc_builder(user_docs, all_docs, params):
     ud_labels = []
     uc_labels = []
 
-#
+    # loop through each user
     for uid in process:
         sample_doc_space = [idx for idx in range(len(all_docs)) if idx not in user_docs[uid]['docs']]
         user_concepts = set(list(itertools.chain.from_iterable(user_docs[uid]['concepts'])))
@@ -286,9 +286,12 @@ def user_doc_builder(user_docs, all_docs, params):
             if len(user_docs[uid]['concepts'][step]) == 0:
                 continue
 
+            user_docs[uid]['concepts'][step] = [concept for concept in user_docs[uid]['concepts'][step] if concept in concept_tkn]
             if len(user_docs[uid]['concepts'][step]) > params['concept_sample_size']:
                 select_concepts = np.random.choice(
-                    user_docs[uid]['concepts'][step], size=params['concept_sample_size'], replace=False)
+                    user_docs[uid]['concepts'][step],
+                    size=params['concept_sample_size'], replace=False,
+                )
             else:
                 select_concepts = user_docs[uid]['concepts'][step]
 
@@ -314,7 +317,7 @@ def user_doc_builder(user_docs, all_docs, params):
     # encode the concepts into indices
     if params['method'] == 'caue_gru':
         concepts = [
-            concept_tkn[concept] for concept in concepts
+            concept_tkn[concept] for concept in concepts if concept in concept_tkn
         ]
     else:
         concepts = [
@@ -337,15 +340,15 @@ def user_doc_builder(user_docs, all_docs, params):
         else:
             concepts = torch.stack(concepts)
         uids_concepts = torch.tensor(uids_concepts)
-        uc_labels = torch.tensor(ud_labels, dtype=torch.float)
+        uc_labels = torch.tensor(uc_labels, dtype=torch.float)
 
     return uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels
 
 
 def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, params):
-    concept_batch_size = params['batch_size'] * (len(concepts) // len(docs))
+    concept_batch_size = int(params['batch_size'] * (len(concepts) / len(docs)))
     # shuffle the dataset
-    if params['method'] == 'caue_bert' or not params['use_keras']:
+    if not params['use_keras']:
         rand_indices_doc = torch.randperm(ud_labels.shape[0])
         rand_indices_concept = torch.randperm(uc_labels.shape[0])
     else:
@@ -367,11 +370,11 @@ def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_l
 
     for idx in range(steps):
         yield uids_docs[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
-            docs[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
-            ud_labels[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
-            uids_concepts[concept_batch_size * idx: concept_batch_size * (idx + 1)], \
-            concepts[concept_batch_size * idx: concept_batch_size * (idx + 1)], \
-            uc_labels[concept_batch_size * idx: concept_batch_size * (idx + 1)]
+              docs[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
+              ud_labels[params['batch_size'] * idx: params['batch_size'] * (idx + 1)], \
+              uids_concepts[concept_batch_size * idx: concept_batch_size * (idx + 1)], \
+              concepts[concept_batch_size * idx: concept_batch_size * (idx + 1)], \
+              uc_labels[concept_batch_size * idx: concept_batch_size * (idx + 1)]
 
 
 def main(params):
@@ -431,7 +434,10 @@ def main(params):
             caue_model.train()
 
         train_iter = user_doc_generator(
-            uids_docs, docs, ud_labels, uids_concepts, concepts, uc_labels, params)
+            uids_docs=uids_docs, docs=docs, ud_labels=ud_labels,
+            uids_concepts=uids_concepts, concepts=concepts, uc_labels=uc_labels,
+            params=params
+        )
 
         for step, train_batch in enumerate(tqdm(train_iter)):
             '''Train'''
@@ -459,6 +465,25 @@ def main(params):
                 concepts_batch = concepts_batch.to(device).long()
                 uc_labels_batch = uc_labels_batch.to(device)
 
+                if torch.any(torch.isnan(uids_docs_batch)) or torch.any(torch.isinf(uids_docs_batch)):
+                    print('invalid input detected at iteration ', step)
+                    continue
+                if torch.any(torch.isnan(docs_batch)) or torch.any(torch.isinf(docs_batch)):
+                    print('invalid input detected at iteration ', step)
+                    continue
+                if torch.any(torch.isnan(ud_labels_batch)) or torch.any(torch.isinf(ud_labels_batch)):
+                    print('invalid input detected at iteration ', step)
+                    continue
+                if torch.any(torch.isnan(uids_concepts_batch)) or torch.any(torch.isinf(uids_concepts_batch)):
+                    print('invalid input detected at iteration ', step)
+                    continue
+                if torch.any(torch.isnan(concepts_batch)) or torch.any(torch.isinf(concepts_batch)):
+                    print('invalid input detected at iteration ', step)
+                    continue
+                if torch.any(torch.isnan(uc_labels_batch)) or torch.any(torch.isinf(uc_labels_batch)):
+                    print('invalid input detected at iteration ', step)
+                    continue
+
                 optimizer.zero_grad()
                 output_doc, output_concept = caue_model(**{
                     'input_uids4doc': uids_docs_batch,
@@ -468,11 +493,16 @@ def main(params):
                 })
                 loss_doc = criterion(output_doc, ud_labels_batch)
                 loss_concept = criterion(output_concept, uc_labels_batch)
-                loss = loss_doc * params['doc_task_weight'] + loss_concept * params['concept_task_weight']
+                # print('Doc Prediction Loss: ', loss_doc.item())
+                # print('Concept Prediction Loss: ', loss_concept.item())
+                loss = loss_doc * params['doc_task_weight'] + loss_concept * params['concept_task_weight'] * \
+                    (len(ud_labels_batch) / len(uc_labels_batch))
                 train_loss += loss.item()
-                loss.backward()
 
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(caue_model.parameters(), 0.5)
                 optimizer.step()
+
                 if scheduler:  # this only applies for the BERT model
                     scheduler.step()
 

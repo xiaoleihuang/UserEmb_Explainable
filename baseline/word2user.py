@@ -112,15 +112,14 @@ if __name__ == '__main__':
     task_data_path = raw_dir + dname + '/' + dname + '.json'
 
     data_dir = raw_dir + dname + '/'
-    baseline_dir = '../resources/baselines/'
+    baseline_dir = '../resources/embedding/'
     task_dir = baseline_dir + dname + '/'
     odir = task_dir + 'word2user/'
     opath_user = odir + 'user.txt'
-    opath_product = odir + 'product.txt'
 
     resource_dir = '../resources/embedding/'
-    tkn_path = '../data/encode/' + dname + '/' + dname + '.tkn'
-    model_path = resource_dir + dname + '/w2v.txt'
+    tkn_path = '../data/processed_data/' + dname + '/' + dname + '.tkn'
+    model_path = resource_dir + dname + '/word_emb.npy'
 
     # create directories
     if not os.path.exists(baseline_dir):

@@ -259,7 +259,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
 
                 for doc in user_info['docs']:
                     user_corpus[user_info['uid']].append(
-                        tok.texts_to_sequences([doc['text']])[0]  # [:params['max_len']]
+                        tok.texts_to_sequences([doc['text']])[0][:params['max_len']]
                     )
         pickle.dump(user_corpus, open(odirectory + 'train_corpus.pkl', 'wb'))
         json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))

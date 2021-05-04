@@ -286,7 +286,8 @@ def user_doc_builder(user_docs, all_docs, params):
             if len(user_docs[uid]['concepts'][step]) == 0:
                 continue
 
-            user_docs[uid]['concepts'][step] = [concept for concept in user_docs[uid]['concepts'][step] if concept in concept_tkn]
+            user_docs[uid]['concepts'][step] = [
+                concept for concept in user_docs[uid]['concepts'][step] if concept in concept_tkn]
             if len(user_docs[uid]['concepts'][step]) > params['concept_sample_size']:
                 select_concepts = np.random.choice(
                     user_docs[uid]['concepts'][step],
@@ -352,10 +353,17 @@ def user_doc_generator(uids_docs, docs, ud_labels, uids_concepts, concepts, uc_l
         rand_indices_doc = torch.randperm(ud_labels.shape[0])
         rand_indices_concept = torch.randperm(uc_labels.shape[0])
     else:
-        rand_indices_doc = list(range(len(ud_labels)))
-        rand_indices_concept = list(range(len(uc_labels)))
+        rand_indices_doc = np.asarray(list(range(len(ud_labels))))
+        rand_indices_concept = np.asarray(list(range(len(uc_labels))))
         np.random.shuffle(rand_indices_doc)
         np.random.shuffle(rand_indices_concept)
+
+        uids_docs = np.asarray(uids_docs)
+        docs = np.asarray(docs)
+        ud_labels = np.asarray(ud_labels)
+        uids_concepts = np.asarray(uids_concepts)
+        concepts = np.asarray(concepts)
+        uc_labels = np.asarray(uc_labels)
 
     uids_docs = uids_docs[rand_indices_doc]
     docs = docs[rand_indices_doc]
@@ -445,18 +453,55 @@ def main(params):
                 train_batch
             # training for the keras
             if params['use_keras'] and params['method'] == 'caue_gru':
-                loss_doc = caue_model[0].train_on_batch(
-                    x=[uids_docs_batch, docs_batch],
-                    y=ud_labels_batch,
-                    sample_weight=[params['doc_task_weight'] * len(ud_labels_batch)]
+                loss_doc = caue_model.train_on_batch(
+                    x={
+                        'user_doc_input': uids_docs_batch,
+                        'doc_input': docs_batch,
+                        'user_concept_input': uids_concepts_batch[:len(ud_labels_batch)],
+                        'concept_input': concepts_batch[:len(ud_labels_batch)]
+                    },
+                    y={
+                        'user_doc_pred': ud_labels_batch,
+                        'user_concept_pred': uc_labels_batch[:len(ud_labels_batch)],
+                    },
                 )
-                train_loss += loss_doc
-                loss_concept = caue_model[1].train_on_batch(
-                    x=[uids_concepts_batch, concepts_batch],
-                    y=uc_labels_batch,
-                    sample_weight=[params['concept_task_weight'] * len(uc_labels_batch)]
-                )
-                train_loss += loss_concept
+                train_loss += loss_doc[0]
+
+                # if len(uids_concepts_batch) != len(ud_labels_batch):
+                #     step_size = len(ud_labels_batch) // len(uc_labels_batch)
+                #
+                #     for batch_step in range(step_size):
+                #         loss_doc = caue_model.train_on_batch(
+                #             x={
+                #                 'user_doc_input': uids_docs_batch,
+                #                 'doc_input': docs_batch,
+                #                 'user_concept_input': uids_concepts_batch[
+                #                     batch_step * len(ud_labels_batch): (batch_step+1) * len(ud_labels_batch)],
+                #                 'concept_input': concepts_batch[
+                #                     batch_step * len(ud_labels_batch): (batch_step+1) * len(ud_labels_batch)]
+                #             },
+                #             y={
+                #                 'user_doc_pred': ud_labels_batch,
+                #                 'user_concept_pred': uc_labels_batch[
+                #                     batch_step * len(ud_labels_batch): (batch_step+1) * len(ud_labels_batch)],
+                #             },
+                #         )
+                #         print(loss_doc)
+                #         train_loss += loss_doc[0]
+                # else:
+                #     loss_doc = caue_model.train_on_batch(
+                #         x={
+                #             'user_doc_input': uids_docs_batch,
+                #             'doc_input': docs_batch,
+                #             'user_concept_input': uids_concepts_batch,
+                #             'concept_input': concepts_batch
+                #         },
+                #         y={
+                #             'user_doc_pred': ud_labels_batch,
+                #             'user_concept_pred': uc_labels_batch,
+                #         },
+                #     )
+                #     train_loss += loss_doc[0]
             else:
                 uids_docs_batch = uids_docs_batch.to(device)
                 docs_batch = docs_batch.to(device).long()
@@ -522,7 +567,7 @@ def main(params):
             caue_model.save(params['odir'] + '{}.model'.format(params['method']))
             np.save(
                 params['odir'] + 'user_{}.npy'.format(epoch),
-                caue_model[0].get_layer(name='user_emb').get_weights()[0]
+                caue_model.get_layer(name='user_emb').get_weights()[0]
             )
         else:
             torch.save(caue_model, params['odir'] + '{}.pth'.format(params['method']))
@@ -579,8 +624,8 @@ if __name__ == '__main__':
         'user_emb_train': True,
         'concept_emb_path': odir + 'concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
-        'concept_task_weight': 1,
-        'epochs': 10,
+        'concept_task_weight': 0,
+        'epochs': 15,
         'optimizer': 'adam',
         'lr': args.lr,
         'negative_sample': args.ng_num,
@@ -588,7 +633,8 @@ if __name__ == '__main__':
         # 'emilyalsentzer/Bio_ClinicalBERT'
         # 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12'
         # 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'
-        'bert_name': 'emilyalsentzer/Bio_ClinicalBERT',
+        # '/data/models/mimiciii_roberta_10e_128b'
+        'bert_name': 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12',
         'decay_rate': .9,
         'warm_steps': 33,
         'bidirectional': True,

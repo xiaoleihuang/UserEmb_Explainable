@@ -48,7 +48,7 @@ def data_loader(params):
     # load the user embeddings, default to load the user.npy
     if os.path.exists(params['emb_dir'] + 'user.npy'):
         uembs = np.load(params['emb_dir'] + 'user.npy')
-    else:
+    elif os.path.exists(params['emb_dir'] + 'user.txt'):
         # this assumes using .txt file
         uembs = [[]] * len(user_tags)
         with open(params['emb_dir'] + 'user.txt') as dfile:
@@ -58,6 +58,8 @@ def data_loader(params):
                     continue
                 uid = user_encoder[line[0]]
                 uembs[uid] = [float(item) for item in line[1].split()]
+    else:
+        uembs = np.load(params['emb_dir'] + 'user_9.npy')
     return uembs, user_tags, tag_encoder, user_encoder
 
 

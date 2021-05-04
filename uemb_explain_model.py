@@ -118,24 +118,37 @@ def build_gru_model(params=None):
     )(user_concept_dot)
 
     '''Compose Multitask model'''
-    ud_model = keras.models.Model(
-        inputs=[user1_input, doc_input],
-        outputs=user_doc_pred
+    # ud_model = keras.models.Model(
+    #     inputs=[user1_input, doc_input],
+    #     outputs=user_doc_pred
+    # )
+    # ud_model.compile(
+    #     loss='binary_crossentropy',
+    #     optimizer=keras.optimizers.RMSprop(lr=params['lr'])
+    # )
+    # uc_model = keras.models.Model(
+    #     inputs=[user2_input, concept_input],
+    #     outputs=user_concept_pred
+    # )
+    # uc_model.compile(
+    #     loss='binary_crossentropy',
+    #     optimizer=keras.optimizers.Adam(lr=params['lr'])
+    # )
+    loss_w_dict = {
+        'user_doc_pred': params['doc_task_weight'],
+        'user_concept_pred': params['concept_task_weight']*0.05,
+    }
+    caue_model = keras.models.Model(
+        inputs=[user1_input, doc_input, user2_input, concept_input],
+        outputs=[user_doc_pred, user_concept_pred]
     )
-    ud_model.compile(
-        loss='binary_crossentropy',
-        optimizer=keras.optimizers.RMSprop(lr=params['lr'])
-    )
-    uc_model = keras.models.Model(
-        inputs=[user2_input, concept_input],
-        outputs=user_concept_pred
-    )
-    uc_model.compile(
-        loss='binary_crossentropy',
-        optimizer=keras.optimizers.Adam(lr=params['lr'])
+    caue_model.compile(
+        loss={'user_doc_pred': 'binary_crossentropy', 'user_concept_pred': 'binary_crossentropy'},
+        optimizer=keras.optimizers.RMSprop(lr=params['lr']),
+        loss_weights=loss_w_dict
     )
 
-    return ud_model, uc_model
+    return caue_model
 
 
 # Dual Neural Network
@@ -184,6 +197,7 @@ class CAUEgru(nn.Module):
             batch_first=True,
             # dropout=self.params['dp_rate']
         )
+        self.cos = nn.CosineSimilarity(dim=-1)
 
         # define self attention networks
         self.att_nn = None
@@ -196,14 +210,16 @@ class CAUEgru(nn.Module):
         _, gru_embs = self.doc_encoder(doc_embs)
         gru_embs = torch.cat((gru_embs[0, :, :], gru_embs[1, :, :]), -1)
         # dot product between user and docs
-        user_doc_sim = torch.sum(users1 * gru_embs, -1)
+        # user_doc_sim = torch.sum(users1 * gru_embs, -1)
+        user_doc_sim = self.cos(users1, gru_embs)
 
         input2_uids = kwargs['input_uids4concept']
         input_concept_ids = kwargs['input_concept_ids']
         users2 = self.uemb(input2_uids)
         concept_embs = self.cemb(input_concept_ids)
         # dot product between user and concepts
-        user_concept_sim = torch.sum(users2 * concept_embs, -1)
+        # user_concept_sim = torch.sum(users2 * concept_embs, -1)
+        user_concept_sim = self.cos(users2, concept_embs)
         return user_doc_sim, user_concept_sim
 
 
@@ -229,6 +245,7 @@ class CAUEBert(nn.Module):
         # a project layer to map 768 dimensional vectors to 300 vectors
         self.linear = nn.Linear(
             self.bert_model.config.hidden_size, self.params['emb_dim'])
+        self.cos = nn.CosineSimilarity(dim=-1)
 
     def forward(self, **kwargs):
         input_doc_ids = kwargs['input_doc_ids']

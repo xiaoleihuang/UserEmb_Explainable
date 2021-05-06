@@ -210,16 +210,16 @@ class CAUEgru(nn.Module):
         _, gru_embs = self.doc_encoder(doc_embs)
         gru_embs = torch.cat((gru_embs[0, :, :], gru_embs[1, :, :]), -1)
         # dot product between user and docs
-        # user_doc_sim = torch.sum(users1 * gru_embs, -1)
-        user_doc_sim = self.cos(users1, gru_embs)
+        user_doc_sim = torch.sum(users1 * gru_embs, -1)
+        # user_doc_sim = self.cos(users1, gru_embs)
 
         input2_uids = kwargs['input_uids4concept']
         input_concept_ids = kwargs['input_concept_ids']
         users2 = self.uemb(input2_uids)
         concept_embs = self.cemb(input_concept_ids)
         # dot product between user and concepts
-        # user_concept_sim = torch.sum(users2 * concept_embs, -1)
-        user_concept_sim = self.cos(users2, concept_embs)
+        user_concept_sim = torch.sum(users2 * concept_embs, -1)
+        # user_concept_sim = self.cos(users2, concept_embs)
         return user_doc_sim, user_concept_sim
 
 

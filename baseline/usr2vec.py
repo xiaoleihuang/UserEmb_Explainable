@@ -8,14 +8,14 @@ import keras
 import numpy as np
 from keras_preprocessing.text import Tokenizer
 import gensim
-from gensim.models.doc2vec import Doc2Vec
-# from keras.preprocessing.sequence import pad_sequences
-# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # for cpu usage
-# os.environ["CUDA_VISIBLE_DEVICES"] = ""
 from baseline_utils import user_word_sampler
 
+# from keras.preprocessing.sequence import pad_sequences
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # for cpu usage
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
-def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
+
+def user_doc_builder(user_docs, tokenizer, negative_samples=1, output_dir=''):
     """This function was re-implemented from the Silvio Amir
     https://github.com/samiroid/usr2vec/tree/master/code
 
@@ -35,7 +35,7 @@ def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
         for uid in uids:
             for doc in user_docs[uid]:
                 doc_couples, doc_labels = user_word_sampler(
-                    uid=uid, sequence=doc, vocab_size=vocab_size, negative_samples=negative_samples
+                    uid=uid, sequence=doc, tokenizer=tokenizer, negative_samples=negative_samples
                 )
                 couples.extend(doc_couples)
                 labels.extend(doc_labels)
@@ -77,10 +77,9 @@ def build_model(params=None):
     if not params:  # default params
         params = {
             'batch_size': 5,
-            'vocab_size': 20001,
+            'vocab_size': 15001,
             'user_size': 8000,
             'emb_dim': 300,
-            'dp_rate': .2,
             'word_emb_path': '../resources/word_emb.npy',
             'user_emb_path': '../resources/user_emb.npy',
             'word_emb_train': False,
@@ -131,23 +130,24 @@ def build_model(params=None):
     word_rep = word_emb(word_input)
     if word_emb.output_dim != params['emb_dim']:
         word_rep = keras.layers.Dense(
-            params['emb_dim'], activation='sigmoid', name='dimension_transform'
+            params['emb_dim'], name='dimension_transform'
         )(word_rep)
 
     user_word_dot = keras.layers.dot(
         [user_rep, word_rep], axes=-1
     )
-    user_word_dot = keras.layers.Reshape((1,))(user_word_dot)
-    user_pred = keras.layers.Dense(
-        1, activation='sigmoid', name='user_pred'
-    )(user_word_dot)
+    user_pred = keras.layers.Reshape((1,))(user_word_dot)
+    # remove this because of source code:
+    # https://github.com/samiroid/usr2vec/blob/0a4cab05ae8a20915340e6647f74be3d75f633fb/code/usr2vec.py#L60
+    # user_pred = keras.layers.Dense(
+    #     1, activation='sigmoid', name='user_pred'
+    # )(user_word_dot)
 
     '''Compose model'''
     if params['optimizer'] == 'adam':
         optimizer = keras.optimizers.Adam(lr=params['lr'])
     else:
-        optimizer = keras.optimizers.SGD(
-            lr=params['lr'], decay=1e-6, momentum=0.9, nesterov=True)
+        optimizer = keras.optimizers.SGD(lr=params['lr'])
 
     # user word model
     ud_model = keras.models.Model(
@@ -182,7 +182,7 @@ def build_emb_layer(tokenizer, emb_path, save_path):
 
     elif emb_path.endswith('.txt'):
         line = open(emb_path).readline()
-        emb_model = np.zeros((emb_len, len(line.strip().split())-1))  # first one is a word not vector.
+        emb_model = np.zeros((emb_len, len(line.strip().split()) - 1))  # first one is a word not vector.
         emb_dim = len(line.strip().split()) - 1
 
         with open(emb_path) as dfile:
@@ -221,11 +221,10 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         del all_docs
 
     params = {
-        'batch_size': 64,
+        'batch_size': 512,
         'vocab_size': tok.num_words,
         'user_size': -1,  # +1 for unknown
         'emb_dim': 300,
-        'dp_rate': .2,
         'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
         'word_emb_path': '../resources/embedding/{}/word_emb.npy'.format(data_name),
         'user_emb_path': '../resources/embedding/{}/user_emb.npy'.format(data_name),
@@ -233,9 +232,9 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         'user_emb_train': True,
         'user_task_weight': 1,
         'epochs': 10,
-        'optimizer': 'adam',
-        'lr': 1e-4,
-        'negative_sample': 3,
+        'optimizer': 'sgd',
+        'lr': 5e-5,
+        'negative_sample': 20,
         'max_len': 512,
     }
 
@@ -274,7 +273,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
 
     # build datasets
     user_words, labels = user_doc_builder(
-        user_corpus, tok.num_words, negative_samples=params['negative_sample'], output_dir=odirectory
+        user_corpus, tok, negative_samples=params['negative_sample'], output_dir=odirectory
     )
 
     # build embedding model

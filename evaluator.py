@@ -10,7 +10,10 @@ import numpy as np
 from scipy.spatial import distance
 from sklearn import metrics
 from sklearn.model_selection import KFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.cluster import SpectralClustering
 import keras
+from tqdm import tqdm
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # for cpu usage
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
@@ -263,6 +266,84 @@ def retrieval(params):
         wfile.write('\n\n')
 
 
+def mortality_eval(params):
+    """
+    This function is design for mimic-iii evaluation only
+    Returns
+    -------
+
+    """
+    if params['dname'] != 'mimic-iii':
+        print('Only MIMIC-III is supported!')
+        return
+
+    # load dataset
+    uembs, _, _, user_encoder = data_loader(params)
+    # load the mortality labels
+    mortality_labels = json.load(open(params['data_dir'] + 'mortality.json'))
+
+    # two types of evaluation: classification and clustering
+    data_x = []
+    data_y = []
+    idx2user = dict()
+    for uid in user_encoder.keys():
+        if uid not in mortality_labels:
+            continue
+        data_x.append(uembs[user_encoder[uid]])
+        data_y.append(mortality_labels[uid])
+        idx2user[len(idx2user)] = uid
+    data_x = np.asarray(data_x)
+    data_y = np.asarray(data_y)
+
+    # five folds cross evaluation
+    lr = LogisticRegression(class_weight='balanced', n_jobs=-1)
+    # split into train/test, k-folds cross validation
+    kf = KFold(n_splits=5, shuffle=True)
+    results = {
+        'precision': [],
+        'recall': [],
+        'f1-score': [],
+        'clustering': 0
+    }
+    for train_idx, test_idx in tqdm(kf.split(data_y), total=5):
+        x_train, x_test = data_x[train_idx], data_x[test_idx]
+        y_train, y_test = data_y[train_idx], data_y[test_idx]
+        lr.fit(X=x_train, y=y_train)
+        predicts = lr.predict(x_test)
+        results['precision'].append(metrics.precision_score(y_pred=predicts, y_true=y_test))
+        results['recall'].append(metrics.recall_score(y_pred=predicts, y_true=y_test))
+        results['f1-score'].append(metrics.f1_score(y_pred=predicts, y_true=y_test, average='weighted'))
+
+    # clustering
+    cluster = SpectralClustering(n_clusters=2, n_jobs=-1)
+    cluster_labels = cluster.fit_predict(data_x)
+    predicts = []
+    y_test = []
+    for uidx in range(len(cluster_labels)):
+        for ujdx in range(uidx + 1, len(cluster_labels)):
+            if mortality_labels[idx2user[uidx]] == mortality_labels[idx2user[ujdx]]:
+                y_test.append(1)
+                if cluster_labels[uidx] == cluster_labels[ujdx]:
+                    predicts.append(1)
+                else:
+                    predicts.append(0)
+            else:
+                y_test.append(0)
+                if cluster_labels[uidx] == cluster_labels[ujdx]:
+                    predicts.append(0)
+                else:
+                    predicts.append(1)
+    results['clustering'] = metrics.f1_score(y_pred=predicts, y_true=y_test, average='weighted')
+    results = json.dumps(results, indent=4)
+    print(results)
+
+    opath = params['odir'] + 'mortality-{}.json'.format(params['dname'])
+    with open(opath, 'a') as wfile:
+        wfile.write(json.dumps(params) + '\n')
+        wfile.write(results)
+        wfile.write('\n\n')
+
+
 if __name__ == '__main__':
     args = argparse.ArgumentParser()
     args.add_argument('--dname', type=str, help='data name')
@@ -286,14 +367,18 @@ if __name__ == '__main__':
     if not os.path.exists(parameters['odir']):
         os.mkdir(parameters['odir'])
 
-    print('Regression Evaluation: ')
-    regression(parameters)
-    print()
+    # print('Regression Evaluation: ')
+    # regression(parameters)
+    # print()
+    #
+    # print('Classification Evaluation: ')
+    # classification(parameters)
+    # print()
+    #
+    # print('Retrieval Evaluation: ')
+    # retrieval(parameters)
+    # print()
 
-    print('Classification Evaluation: ')
-    classification(parameters)
-    print()
-
-    print('Retrieval Evaluation: ')
-    retrieval(parameters)
+    print('MIMIC-III Mortality: ')
+    mortality_eval(parameters)
     print()

@@ -418,6 +418,7 @@ def main(params):
         criterion = nn.BCEWithLogitsLoss().to(device)
         if params['method'] == 'caue_gru':
             optimizer = torch.optim.RMSprop(caue_model.parameters(), lr=params['lr'])
+            # optimizer = torch.optim.Adam(caue_model.parameters(), lr=params['lr'])
             scheduler = None  # no needs to adjust lr for the rmsprop
         else:
             optimize_parameters = [
@@ -557,7 +558,7 @@ def main(params):
                 train_loss_avg,
                 step + (len(uids_docs_batch) // params['batch_size']) * epoch
             )
-            if step % 200 == 0:
+            if (step+1) % 200 == 0:
                 print('Epoch: {}, Step: {}'.format(epoch, step))
                 print('\t Loss: {}.'.format(train_loss_avg))
                 print('-------------------------------------------------')
@@ -585,7 +586,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_concept', type=bool, help='If use concept as additional features', default=True)
     parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=False)
     parser.add_argument('--lr', type=float, help='Learning rate', default=.0001)
-    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=1)
+    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=3)
     parser.add_argument('--batch_size', type=int, help='Batch size', default=32)
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)
@@ -624,7 +625,7 @@ if __name__ == '__main__':
         'user_emb_train': True,
         'concept_emb_path': odir + 'concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
-        'concept_task_weight': 0,
+        'concept_task_weight': .3,
         'epochs': 15,
         'optimizer': 'adam',
         'lr': args.lr,
@@ -644,7 +645,7 @@ if __name__ == '__main__':
         'vocab_size': 15000,
         'concept_tkn_path': data_dir + 'concept_tkn.pkl',
         'word_tkn_path': data_dir + 'word_tkn.pkl',
-        'concept_sample_size': 20,  # to sample the number per document for training, prevent too many
+        'concept_sample_size': 33,  # to sample the number per document for training, prevent too many
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
     }

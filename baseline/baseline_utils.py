@@ -125,17 +125,15 @@ def sample_decay(count, decay=2):
     return 1 / (1 + decay * count)
 
 
-def user_word_sampler(uid, sequence, vocab_size, filter_words=None, negative_samples=1):
+def user_word_sampler(uid, sequence, tokenizer, filter_words=None, negative_samples=1):
     """This function was partially adopted from
     https://github.com/keras-team/keras-preprocessing/blob/master/keras_preprocessing/sequence.py#L151
-
-        uid (int): a user id index
-        sequence (list): a sequence of word indices
-        vocab_size (int): word vocabulary size
     """
     couples = []
     labels = []
     word_set = set(sequence)
+    if filter_words:
+        word_set = word_set.union(filter_words)
 
     sample_size = 256
     # for wid in sequence:
@@ -150,20 +148,29 @@ def user_word_sampler(uid, sequence, vocab_size, filter_words=None, negative_sam
         couples = list(couples[sample_indices])
         labels = list(labels[sample_indices])
 
+    norm_probs = [0] * tokenizer.num_words
+    for wid in tokenizer.index_word:
+        if wid > tokenizer.num_words-1:
+            continue
+        if wid in word_set:
+            continue
+        norm_probs[wid] = tokenizer.word_counts[tokenizer.index_word[wid]]**.75
+    scaling = int(np.ceil(1./min(norm_probs)))
+    norm_probs *= scaling
+    norm_probs_sum = sum(norm_probs)
+    norm_probs /= norm_probs_sum
+    negative_set = [item for item in range(tokenizer.num_words) if item not in word_set]
+    num_negative_samples = int(len(labels) * negative_samples)
+
     if negative_samples > 0:
-        num_negative_samples = int(len(labels) * negative_samples)
-
-        for idx in range(num_negative_samples):
+        wid_list = np.random.choice(
+            negative_set,
+            size=num_negative_samples,
+            p=norm_probs
+        )
+        for wid in wid_list:
             # 0 is placeholder, starts by 1
-            wid = np.random.randint(1, vocab_size - 1)
-            while wid in word_set:
-                wid = np.random.randint(1, vocab_size - 1)
-
             # ensure user did not use the word
-            if filter_words:
-                while wid in filter_words and len(filter_words) <= vocab_size:
-                    wid = np.random.randint(1, vocab_size - 1)
-
             couples.append([uid, wid])
             labels.append(0)
 

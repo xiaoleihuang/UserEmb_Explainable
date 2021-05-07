@@ -430,7 +430,7 @@ def main(params):
             optimizer = AdamW(optimize_parameters, lr=params['lr'])
             scheduler = get_linear_schedule_with_warmup(
                 optimizer, num_warmup_steps=params['warm_steps'],
-                num_training_steps=params['batch_size'] * params['epochs']
+                num_training_steps=(len(ud_labels) // params['batch_size'] + 1)*params['epochs']
             )
         if 'cuda' in params['device']:
             caue_model.cuda()
@@ -558,7 +558,7 @@ def main(params):
                 train_loss_avg,
                 step + (len(uids_docs_batch) // params['batch_size']) * epoch
             )
-            if (step+1) % 200 == 0:
+            if (step+1) % 100 == 0:
                 print('Epoch: {}, Step: {}'.format(epoch, step))
                 print('\t Loss: {}.'.format(train_loss_avg))
                 print('-------------------------------------------------')
@@ -586,7 +586,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_concept', type=bool, help='If use concept as additional features', default=True)
     parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=False)
     parser.add_argument('--lr', type=float, help='Learning rate', default=.0001)
-    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=3)
+    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=9)
     parser.add_argument('--batch_size', type=int, help='Batch size', default=32)
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)

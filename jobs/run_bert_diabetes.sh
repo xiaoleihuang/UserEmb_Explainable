@@ -1,6 +1,6 @@
 #!/bin/bash
 cd ..
-CUDA_VISIBLE_DEVICES=0 python uemb_explain_train.py \
+CUDA_VISIBLE_DEVICES=1 python uemb_explain_train.py \
 --method caue_bert --dname diabetes --use_concept True \
---device cpu
+--device cuda --lr 3e-5
 #--use_keras True

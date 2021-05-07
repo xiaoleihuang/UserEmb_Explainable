@@ -80,42 +80,43 @@ def regression(params):
     true_labels_sets = []
     pred_labels_vals = []
     uids = list(user_tags.keys())
-    for idx in range(len(user_tags)):
-        for jdx in range(idx, len(user_tags)):
-            idx_uid = uids[idx]
-            jdx_uid = uids[jdx]
+    for idx in tqdm(range(len(user_tags))):
+        # for jdx in tqdm(range(idx, len(user_tags))):
+        jdx = np.random.choice(list(range(len(user_tags))))
+        idx_uid = uids[idx]
+        jdx_uid = uids[jdx]
 
-            # for true_label_tags
-            idx_tags = [user_tags[idx_uid]['tags'].get(tag, 0) for tag in tag_encoder]
-            tag_sum = sum(idx_tags)
-            if tag_sum == 0:
-                continue
-            idx_tags = [item / tag_sum for item in idx_tags]  # normalization
+        # for true_label_tags
+        idx_tags = [user_tags[idx_uid]['tags'].get(tag, 0) for tag in tag_encoder]
+        tag_sum = sum(idx_tags)
+        if tag_sum == 0:
+            continue
+        idx_tags = [item / tag_sum for item in idx_tags]  # normalization
 
-            jdx_tags = [user_tags[jdx_uid]['tags'].get(tag, 0) for tag in tag_encoder]
-            tag_sum = sum(jdx_tags)
-            if tag_sum == 0:
-                continue
-            jdx_tags = [item / tag_sum for item in jdx_tags]  # normalization
+        jdx_tags = [user_tags[jdx_uid]['tags'].get(tag, 0) for tag in tag_encoder]
+        tag_sum = sum(jdx_tags)
+        if tag_sum == 0:
+            continue
+        jdx_tags = [item / tag_sum for item in jdx_tags]  # normalization
 
-            if params['sim_method'] == 'cosine':
-                true_labels_tags.append(distance.cosine(idx_tags, jdx_tags))
-            else:
-                true_labels_tags.append(1 / (1 + np.exp(-1 * np.dot(idx_tags, jdx_tags))))
+        if params['sim_method'] == 'cosine':
+            true_labels_tags.append(distance.cosine(idx_tags, jdx_tags))
+        else:
+            true_labels_tags.append(1 / (1 + np.exp(-1 * np.dot(idx_tags, jdx_tags))))
 
-            # for true_labels_sets
-            idx_tags = [1 if tag in user_tags[idx_uid]['tags_set'] else 0 for tag in tag_encoder]
-            jdx_tags = [1 if tag in user_tags[jdx_uid]['tags_set'] else 0 for tag in tag_encoder]
-            if params['sim_method'] == 'cosine':
-                true_labels_sets.append(distance.cosine(idx_tags, jdx_tags))
-            else:
-                true_labels_sets.append(1 / (1 + np.exp(-1 * np.dot(idx_tags, jdx_tags))))
+        # for true_labels_sets
+        idx_tags = [1 if tag in user_tags[idx_uid]['tags_set'] else 0 for tag in tag_encoder]
+        jdx_tags = [1 if tag in user_tags[jdx_uid]['tags_set'] else 0 for tag in tag_encoder]
+        if params['sim_method'] == 'cosine':
+            true_labels_sets.append(distance.cosine(idx_tags, jdx_tags))
+        else:
+            true_labels_sets.append(1 / (1 + np.exp(-1 * np.dot(idx_tags, jdx_tags))))
 
-            # for predictions
-            if params['sim_method'] == 'cosine':
-                pred_labels_vals.append(distance.cosine(uembs[idx_uid], uembs[jdx_uid]))
-            else:
-                pred_labels_vals.append(1 / (1 + np.exp(-1 * np.dot(uembs[idx_uid], uembs[jdx_uid]))))
+        # for predictions
+        if params['sim_method'] == 'cosine':
+            pred_labels_vals.append(distance.cosine(uembs[idx_uid], uembs[jdx_uid]))
+        else:
+            pred_labels_vals.append(1 / (1 + np.exp(-1 * np.dot(uembs[idx_uid], uembs[jdx_uid]))))
 
     # calculate rmse
     results = dict()
@@ -286,7 +287,9 @@ def mortality_eval(params):
     data_x = []
     data_y = []
     idx2user = dict()
-    for uid in user_encoder.keys():
+    uids = list(user_encoder.keys())
+    np.random.shuffle(uids)
+    for uid in uids:  # [:10000]
         if uid not in mortality_labels:
             continue
         data_x.append(uembs[user_encoder[uid]])
@@ -296,7 +299,6 @@ def mortality_eval(params):
     data_y = np.asarray(data_y)
 
     # five folds cross evaluation
-    lr = LogisticRegression(class_weight='balanced', n_jobs=-1)
     # split into train/test, k-folds cross validation
     kf = KFold(n_splits=5, shuffle=True)
     results = {
@@ -308,6 +310,7 @@ def mortality_eval(params):
     for train_idx, test_idx in tqdm(kf.split(data_y), total=5):
         x_train, x_test = data_x[train_idx], data_x[test_idx]
         y_train, y_test = data_y[train_idx], data_y[test_idx]
+        lr = LogisticRegression(class_weight='balanced', n_jobs=-1, max_iter=1000)
         lr.fit(X=x_train, y=y_train)
         predicts = lr.predict(x_test)
         results['precision'].append(metrics.precision_score(y_pred=predicts, y_true=y_test))
@@ -334,6 +337,9 @@ def mortality_eval(params):
                 else:
                     predicts.append(1)
     results['clustering'] = metrics.f1_score(y_pred=predicts, y_true=y_test, average='weighted')
+    results['f1-score'] = np.mean(results['f1-score'])
+    results['precision'] = np.mean(results['precision'])
+    results['recall'] = np.mean(results['recall'])
     results = json.dumps(results, indent=4)
     print(results)
 
@@ -367,17 +373,17 @@ if __name__ == '__main__':
     if not os.path.exists(parameters['odir']):
         os.mkdir(parameters['odir'])
 
-    # print('Regression Evaluation: ')
-    # regression(parameters)
-    # print()
-    #
-    # print('Classification Evaluation: ')
-    # classification(parameters)
-    # print()
-    #
-    # print('Retrieval Evaluation: ')
-    # retrieval(parameters)
-    # print()
+    print('Regression Evaluation: ')
+    regression(parameters)
+    print()
+
+    print('Classification Evaluation: ')
+    classification(parameters)
+    print()
+
+    print('Retrieval Evaluation: ')
+    retrieval(parameters)
+    print()
 
     print('MIMIC-III Mortality: ')
     mortality_eval(parameters)

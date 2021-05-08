@@ -91,12 +91,17 @@ class Word2User(object):
 
         for tid in list(item_dict.keys()):
             # encode the document by word2vec
-            item_dict[tid] = np.asarray([
+            item_dict[tid] = {}
+            # average the word2vec inferred documents
+            item_dict[tid]['word'] = np.mean(np.asarray([
                 self.model[self.tkn.word_index[word]] for word in item_dict[tid]
                 if word in self.tkn.word_index and self.tkn.word_index[word] < self.tkn.num_words
-            ])
-            # average the word2vec inferred documents
-            item_dict[tid] = np.mean(item_dict[tid], axis=0)
+            ]), axis=0)
+            # average the word2vec inferred concepts
+            item_dict[tid]['concept'] = np.mean(np.asarray([
+                self.model[self.tkn.word_index[concept]] for concept in item_dict[tid]
+                if concept in self.tkn.word_index and self.tkn.word_index[concept] < self.tkn.num_words
+            ]), axis=0)
 
             # write to file
             ofile.write(tid + '\t' + ' '.join(map(str, item_dict[tid])) + '\n')

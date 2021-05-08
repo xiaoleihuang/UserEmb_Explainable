@@ -37,6 +37,7 @@ def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
                 doc_couples, doc_labels = user_word_sampler(
                     uid=uid, sequence=doc, vocab_size=vocab_size, negative_samples=negative_samples
                 )
+
                 couples.extend(doc_couples)
                 labels.extend(doc_labels)
 
@@ -96,6 +97,7 @@ def build_model(params=None):
     # User Input
     user_input = keras.layers.Input((1,), name='user_input', dtype='int32')
     word_input = keras.layers.Input((1,), name='word_input', dtype='int32')
+    concept_input = keras.layers.Input((1,), name='concept_input', dtype='int32')
 
     # load weights if word embedding path is given
     if os.path.exists(params['word_emb_path']):
@@ -129,10 +131,14 @@ def build_model(params=None):
     '''User Word Dot Production'''
     user_rep = user_emb(user_input)
     word_rep = word_emb(word_input)
+    concept_rep = word_emb(concept_input)
+
     if word_emb.output_dim != params['emb_dim']:
-        word_rep = keras.layers.Dense(
+        projector = keras.layers.Dense(
             params['emb_dim'], activation='sigmoid', name='dimension_transform'
-        )(word_rep)
+        )
+        word_rep = projector(word_rep)
+        concept_rep = projector(concept_rep)
 
     user_word_dot = keras.layers.dot(
         [user_rep, word_rep], axes=-1
@@ -141,6 +147,14 @@ def build_model(params=None):
     user_pred = keras.layers.Dense(
         1, activation='sigmoid', name='user_pred'
     )(user_word_dot)
+
+    user_concept_dot = keras.layers.dot(
+        [user_rep, concept_rep], axes=-1
+    )
+    user_concept_dot = keras.layers.Reshape((1,))(user_concept_dot)
+    concept_pred = keras.layers.Dense(
+        1, activation='sigmoid', name='concept_pred'
+    )(user_concept_dot)
 
     '''Compose model'''
     if params['optimizer'] == 'adam':
@@ -151,8 +165,8 @@ def build_model(params=None):
 
     # user word model
     ud_model = keras.models.Model(
-        inputs=[user_input, word_input],
-        outputs=user_pred
+        inputs=[user_input, word_input, concept_input],
+        outputs=[user_pred, concept_pred]
     )
     ud_model.compile(loss='binary_crossentropy', optimizer=optimizer)
     print(ud_model.summary())
@@ -203,6 +217,7 @@ def build_emb_layer(tokenizer, emb_path, save_path):
         raise ValueError('Current other formats are not supported!')
 
 
+# TODO: add concept support
 def main(data_name, encode_directory, odirectory='../resources/'):
     # load tokenizer
     if os.path.exists(encode_directory + data_name + '.tkn'):
@@ -227,6 +242,8 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         'emb_dim': 300,
         'dp_rate': .2,
         'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
+        'concept_dir': encode_directory + 'concepts/',
+        'concept_tkn': encode_directory + 'concept_tkn.pkl',
         'word_emb_path': '../resources/embedding/{}/word_emb.npy'.format(data_name),
         'user_emb_path': '../resources/embedding/{}/user_emb.npy'.format(data_name),
         'word_emb_train': False,
@@ -240,6 +257,22 @@ def main(data_name, encode_directory, odirectory='../resources/'):
     }
 
     # load user encoder, which convert users into indices
+    concept_tkn = pickle.load(open(params['concept_tkn'], 'rb'))
+    user_concepts = {
+        'user': dict(),
+        'all_concepts': set(),
+    }
+    for filep in os.listdir(params['concept_dir']):
+        concepts = pickle.load(open(params['concept_dir'] + filep, 'rb'))
+        uid = filep.split('_')[0]
+        if uid not in user_concepts['user']:
+            user_concepts['user'][uid] = []
+
+        for concept in concepts:
+            encoded_concept = tok.texts_to_sequences([concept.lower()])[0]
+            user_concepts['user'][uid].extend(encoded_concept)
+            user_concepts['all_concepts'].update(encoded_concept)
+
     if os.path.exists(odirectory + 'train_corpus.pkl') and \
             os.path.exists(encode_directory + 'user_encoder.json'):
         user_corpus = pickle.load(open(odirectory + 'train_corpus.pkl', 'rb'))
@@ -326,7 +359,7 @@ if __name__ == '__main__':
     odir = '../resources/embedding/{}/'.format(dname)
     if not os.path.exists(odir):
         os.mkdir(odir)
-    odir = odir + 'user2vec/'
+    odir = odir + 'user2vec_concept/'
     if not os.path.exists(odir):
         os.mkdir(odir)
 

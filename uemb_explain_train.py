@@ -53,7 +53,7 @@ def concept_preprocessor(concepts):
     results = []
 
     for concept in concepts:
-        items = concept.split(',')
+        items = concept.lower().replace('(', ' ').replace(')', ' ').split(',')
         if len(items) > 3:
             continue
 
@@ -102,8 +102,6 @@ def build_concept_weights(params):
         vector = [w2v_model[token] for token in tokens if token in w2v_model]
         emb_model[idx] = np.mean(vector, axis=0)
 
-    # save the extracted embedding weights
-    np.save(params['concept_emb_path'], emb_model)
     # save the extracted embedding weights
     np.save(params['concept_emb_path'], emb_model)
 
@@ -193,7 +191,7 @@ def data_builder(**kwargs):
                     if concept_fname in concept_files:
                         concepts = pickle.load(open(kwargs['concept_dir'] + concept_fname, 'rb'))
                         # filter out low confident medical concepts
-                        concepts = [item['preferred_name'] for item in concepts if float(item['score']) > 3.6]
+                        concepts = [item['preferred_name'].lower() for item in concepts if float(item['score']) > 3.6]
                         # concepts = [item['preferred_name'] for item in concepts]
                         concepts = concept_preprocessor(concepts)
                         for concept in concepts:
@@ -218,6 +216,7 @@ def data_builder(**kwargs):
         ))
         with open(kwargs['concept_tkn_path'], 'wb') as wfile:
             pickle.dump(concepts_tkn, wfile)
+        build_concept_weights(kwargs)
 
         if not os.path.exists(kwargs['word_tkn_path']):
             # 15000 known + 1 unknown tokens
@@ -585,8 +584,8 @@ if __name__ == '__main__':
     parser.add_argument('--dname', type=str, help='The data\'s name')
     parser.add_argument('--use_concept', type=bool, help='If use concept as additional features', default=True)
     parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=False)
-    parser.add_argument('--lr', type=float, help='Learning rate', default=.0001)
-    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=9)
+    parser.add_argument('--lr', type=float, help='Learning rate', default=3e-4)
+    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=3)
     parser.add_argument('--batch_size', type=int, help='Batch size', default=32)
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)
@@ -623,7 +622,7 @@ if __name__ == '__main__':
         'word_emb_path': odir + 'word_emb.npy'.format(args.dname),
         'user_emb_path': odir + 'user_emb.npy'.format(args.dname),
         'user_emb_train': True,
-        'concept_emb_path': odir + 'concept_emb.npy'.format(args.dname),
+        'concept_emb_path': odir + '{}_concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
         'concept_task_weight': .3,
         'epochs': 15,

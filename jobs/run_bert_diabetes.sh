@@ -2,5 +2,5 @@
 cd ..
 CUDA_VISIBLE_DEVICES=1 python uemb_explain_train.py \
 --method caue_bert --dname diabetes --use_concept True \
---device cuda --lr 3e-5
+--device cpu
 #--use_keras True

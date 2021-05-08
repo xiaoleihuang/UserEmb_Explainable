@@ -8,8 +8,6 @@ input features: 300 topics from lda
 encoder: two layers of autoencoder
 
 """
-
-
 import pickle
 import sys
 import json
@@ -169,7 +167,6 @@ if __name__ == '__main__':
     odir = task_dir + 'deeppatient2user/'
     if not os.path.exists(odir):
         os.mkdir(odir)
-
     opath_user = odir + 'user.txt'
 
     dict_path = task_dir + 'lda_dict.pkl'

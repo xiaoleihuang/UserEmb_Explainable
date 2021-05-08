@@ -62,7 +62,7 @@ def data_loader(params):
                 uid = user_encoder[line[0]]
                 uembs[uid] = [float(item) for item in line[1].split()]
     else:
-        uembs = np.load(params['emb_dir'] + 'user_9.npy')
+        uembs = np.load(params['emb_dir'] + 'user_2.npy')
     return uembs, user_tags, tag_encoder, user_encoder
 
 

@@ -61,17 +61,21 @@ def concept_preprocessor(concepts):
         items = [item for item in tkn.tokenize(concept) if len(item) > 2 and not item.isnumeric()]
         if len(items) == 0:
             continue
+
+        # use phrases
         results.append(' '.join(items))
+        # use words
+        # results.extend(items)
     return results
 
 
 def build_concept_weights(params):
     emb_path = params['emb_path']  # pretrained word embedding path
-    concepts_tkn = pickle.load(open(params['concepts_tkn_path'], 'rb'))
+    concept_tkn = pickle.load(open(params['concept_tkn_path'], 'rb'))
 
     # derived by pretrained embeddings
     # support three types, bin/txt/npy
-    emb_len = len(concepts_tkn)
+    emb_len = len(concept_tkn)
     vector_size = -1
     if emb_path.endswith('.bin'):
         w2v_model = gensim.models.KeyedVectors.load_word2vec_format(
@@ -97,13 +101,19 @@ def build_concept_weights(params):
         raise ValueError('Current other formats are not supported!')
 
     emb_model = np.zeros((emb_len, vector_size))
-    for idx, concept in enumerate(concepts_tkn):
+    for idx, concept in enumerate(list(concept_tkn.keys())):
         tokens = concept.split()
         vector = [w2v_model[token] for token in tokens if token in w2v_model]
-        emb_model[idx] = np.mean(vector, axis=0)
+        if len(vector) > 1:
+            emb_model[idx] = np.mean(vector, axis=0)
+        elif len(vector) == 1:
+            emb_model[idx] = vector[0]
+            del concept_tkn[concept]
 
     # save the extracted embedding weights
     np.save(params['concept_emb_path'], emb_model)
+    if len(concept_tkn) != len(emb_model):
+        pickle.dump(concept_tkn, open(params['concept_tkn_path'], 'wb'))
 
 
 def build_emb_weights(tokenizer, emb_path, save_path):
@@ -204,18 +214,18 @@ def data_builder(**kwargs):
                         user_corpus[user_entity['uid']]['concepts'].append([])
 
         # sort the concepts info, by its count
-        concepts_tkn = list(sorted(
+        concept_tkn = list(sorted(
             concepts_info.items(),
             key=lambda item: item[1],
             reverse=True
         ))[:kwargs['vocab_size']]
         # map concepts to indices
-        concepts_tkn = dict(zip(
-            [item[0] for item in concepts_tkn],
-            range(len(concepts_tkn))
+        concept_tkn = dict(zip(
+            [item[0] for item in concept_tkn],
+            range(len(concept_tkn))
         ))
         with open(kwargs['concept_tkn_path'], 'wb') as wfile:
-            pickle.dump(concepts_tkn, wfile)
+            pickle.dump(concept_tkn, wfile)
         build_concept_weights(kwargs)
 
         if not os.path.exists(kwargs['word_tkn_path']):
@@ -624,7 +634,7 @@ if __name__ == '__main__':
         'user_emb_train': True,
         'concept_emb_path': odir + '{}_concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
-        'concept_task_weight': .3,
+        'concept_task_weight': .03,
         'epochs': 15,
         'optimizer': 'adam',
         'lr': args.lr,

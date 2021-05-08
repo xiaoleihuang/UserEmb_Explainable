@@ -136,7 +136,7 @@ def build_gru_model(params=None):
     # )
     loss_w_dict = {
         'user_doc_pred': params['doc_task_weight'],
-        'user_concept_pred': params['concept_task_weight']*0.05,
+        'user_concept_pred': params['concept_task_weight']*0.1,
     }
     caue_model = keras.models.Model(
         inputs=[user1_input, doc_input, user2_input, concept_input],
@@ -164,13 +164,14 @@ class CAUEgru(nn.Module):
             self.uemb = nn.Embedding(
                 self.params['user_size'], self.params['emb_dim']
             )
-            self.uemb.reset_parameters()
+            # self.uemb.reset_parameters()
             torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
 
         # word embeddings
-        if 'pretrained_wemb' in self.params and os.path.exists(self.params['pretrained_wemb']):
+        if 'word_emb_path' in self.params and os.path.exists(self.params['word_emb_path']):
             self.wemb = nn.Embedding.from_pretrained(
-                self.params['pretrained_uemb'])
+                torch.FloatTensor(np.load(self.params['word_emb_path']))
+            )
             self.wemb.requires_grad_(requires_grad=False)  # freeze the weight update
         else:
             self.wemb = nn.Embedding(
@@ -181,13 +182,15 @@ class CAUEgru(nn.Module):
         # concept embeddings
         if os.path.exists(self.params['concept_emb_path']):
             self.cemb = nn.Embedding.from_pretrained(
-                self.params['pretrained_uemb'])
+                torch.FloatTensor(np.load(self.params['concept_emb_path']))
+            )
             self.cemb.requires_grad_(requires_grad=False)  # freeze the weight update
         else:
             self.cemb = nn.Embedding(
                 self.params['concept_size'], self.params['emb_dim']
             )
             torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
+        self.concept_projector = nn.Linear(self.cemb.embedding_dim, self.uemb.embedding_dim)
 
         # to encode words in documents
         self.doc_encoder = nn.GRU(
@@ -195,12 +198,10 @@ class CAUEgru(nn.Module):
             hidden_size=self.params['emb_dim'] // 2,
             bidirectional=self.params['bidirectional'],
             batch_first=True,
-            # dropout=self.params['dp_rate']
+            dropout=self.params['dp_rate']
         )
-        self.cos = nn.CosineSimilarity(dim=-1)
-
-        # define self attention networks
-        self.att_nn = None
+        # self.cos = nn.CosineSimilarity(dim=-1)
+        # self.att_nn = None
 
     def forward(self, **kwargs):
         input_doc_ids = kwargs['input_doc_ids']
@@ -217,6 +218,7 @@ class CAUEgru(nn.Module):
         input_concept_ids = kwargs['input_concept_ids']
         users2 = self.uemb(input2_uids)
         concept_embs = self.cemb(input_concept_ids)
+        concept_embs = torch.relu(self.concept_projector(concept_embs))
         # dot product between user and concepts
         user_concept_sim = torch.sum(users2 * concept_embs, -1)
         # user_concept_sim = self.cos(users2, concept_embs)
@@ -260,7 +262,7 @@ class CAUEBert(nn.Module):
         doc_embs = self.dropout(self.linear(doc_bert_embs[1]))
 
         concept_bert_embs = self.bert_model(input_ids=input_concept_ids)
-        concept_embs = self.dropout(self.linear(concept_bert_embs[1]))
+        concept_embs = self.dropout(torch.sigmoid(self.linear(concept_bert_embs[1])))
 
         user_doc_sims = torch.sum(users4doc * doc_embs, -1)
         user_concept_sims = torch.sum(users4concept * concept_embs, -1)

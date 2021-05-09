@@ -180,17 +180,18 @@ class CAUEgru(nn.Module):
             torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
 
         # concept embeddings
-        if os.path.exists(self.params['concept_emb_path']):
-            self.cemb = nn.Embedding.from_pretrained(
-                torch.FloatTensor(np.load(self.params['concept_emb_path']))
-            )
-            self.cemb.requires_grad_(requires_grad=False)  # freeze the weight update
-        else:
-            self.cemb = nn.Embedding(
-                self.params['concept_size'], self.params['emb_dim']
-            )
-            torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
-        self.concept_projector = nn.Linear(self.cemb.embedding_dim, self.uemb.embedding_dim)
+        if params['use_concept']:
+            if os.path.exists(self.params['concept_emb_path']):
+                self.cemb = nn.Embedding.from_pretrained(
+                    torch.FloatTensor(np.load(self.params['concept_emb_path']))
+                )
+                self.cemb.requires_grad_(requires_grad=False)  # freeze the weight update
+            else:
+                self.cemb = nn.Embedding(
+                    self.params['concept_size'], self.params['emb_dim']
+                )
+                torch.nn.init.kaiming_uniform_(self.uemb.weight, a=np.sqrt(5))
+            self.concept_projector = nn.Linear(self.cemb.embedding_dim, self.uemb.embedding_dim)
 
         # to encode words in documents
         self.doc_encoder = nn.GRU(
@@ -214,14 +215,18 @@ class CAUEgru(nn.Module):
         user_doc_sim = torch.sum(users1 * gru_embs, -1)
         # user_doc_sim = self.cos(users1, gru_embs)
 
-        input2_uids = kwargs['input_uids4concept']
-        input_concept_ids = kwargs['input_concept_ids']
-        users2 = self.uemb(input2_uids)
-        concept_embs = self.cemb(input_concept_ids)
-        concept_embs = torch.relu(self.concept_projector(concept_embs))
-        # dot product between user and concepts
-        user_concept_sim = torch.sum(users2 * concept_embs, -1)
-        # user_concept_sim = self.cos(users2, concept_embs)
+        if self.params['use_concept']:
+            input2_uids = kwargs['input_uids4concept']
+            input_concept_ids = kwargs['input_concept_ids']
+            users2 = self.uemb(input2_uids)
+            concept_embs = self.cemb(input_concept_ids)
+            concept_embs = torch.relu(self.concept_projector(concept_embs))
+            # dot product between user and concepts
+            user_concept_sim = torch.sum(users2 * concept_embs, -1)
+            # user_concept_sim = self.cos(users2, concept_embs)
+        else:
+            user_concept_sim = None
+
         return user_doc_sim, user_concept_sim
 
 

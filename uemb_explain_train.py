@@ -547,11 +547,15 @@ def main(params):
                     'input_concept_ids': concepts_batch
                 })
                 loss_doc = criterion(output_doc, ud_labels_batch)
-                loss_concept = criterion(output_concept, uc_labels_batch)
-                # print('Doc Prediction Loss: ', loss_doc.item())
-                # print('Concept Prediction Loss: ', loss_concept.item())
-                loss = loss_doc * params['doc_task_weight'] + loss_concept * params['concept_task_weight'] * \
-                    (len(ud_labels_batch) / len(uc_labels_batch))
+                if params['use_concept']:
+                    loss_concept = criterion(output_concept, uc_labels_batch)
+
+                    # print('Doc Prediction Loss: ', loss_doc.item())
+                    # print('Concept Prediction Loss: ', loss_concept.item())
+                    loss = loss_doc * params['doc_task_weight'] + loss_concept * params['concept_task_weight'] * \
+                        (len(ud_labels_batch) / len(uc_labels_batch))
+                else:
+                    loss = loss_doc * params['doc_task_weight']
                 train_loss += loss.item()
 
                 loss.backward()
@@ -588,11 +592,32 @@ def main(params):
     writer.close()
 
 
+def str2bool(v):
+    """
+    https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
+    Parameters
+    ----------
+    v
+
+    Returns
+    -------
+
+    """
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process model parameters.')
     parser.add_argument('--method', type=str, help='caue_gru or caue_bert')
     parser.add_argument('--dname', type=str, help='The data\'s name')
-    parser.add_argument('--use_concept', type=bool, help='If use concept as additional features', default=True)
+    parser.add_argument('--use_concept', type=str2bool, help='If use concept as additional features')
     parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=False)
     parser.add_argument('--lr', type=float, help='Learning rate', default=3e-4)
     parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=3)
@@ -610,7 +635,11 @@ if __name__ == '__main__':
     odir = './resources/embedding/{}/'.format(args.dname)
     if not os.path.exists(odir):
         os.mkdir(odir)
-    odir = odir + '{}/'.format(args.method)
+
+    if args.use_concept:
+        odir = odir + '{}/'.format(args.method)
+    else:
+        odir = odir + '{}_no/'.format(args.method)
     if not os.path.exists(odir):
         os.mkdir(odir)
 
@@ -634,7 +663,7 @@ if __name__ == '__main__':
         'user_emb_train': True,
         'concept_emb_path': odir + '{}_concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
-        'concept_task_weight': .03,
+        'concept_task_weight': .03 if args.use_concept else 0,
         'epochs': 15,
         'optimizer': 'adam',
         'lr': args.lr,

@@ -4,12 +4,15 @@ Media-based Substance Use Prediction
 
 PostLDA-Doc
 """
-from gensim.models import LdaModel
 import pickle
 import numpy as np
 import sys
 import json
 import os
+import itertools
+
+from baseline_utils import data_loader
+from gensim.models import LdaModel
 
 
 class Lda2User(object):

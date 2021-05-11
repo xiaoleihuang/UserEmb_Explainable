@@ -2,6 +2,7 @@ import json
 import os
 import pickle
 import sys
+import itertools
 
 from tqdm import tqdm
 import keras
@@ -15,7 +16,8 @@ from gensim.models.doc2vec import Doc2Vec
 from baseline_utils import user_word_sampler, data_loader
 
 
-def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
+def user_doc_concept_builder(
+        user_docs, all_docs, word_tkn, concept_tkn, user_encoder, negative_samples=1, output_dir=''):
     """This function was re-implemented from the Silvio Amir
     https://github.com/samiroid/usr2vec/tree/master/code
 
@@ -23,51 +25,62 @@ def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
         sequence (list): a sequence of word indices
         emb_dim (int): document size
     """
-    if os.path.exists(output_dir + 'usr2vec_user_docs.pkl'):
-        tmp = pickle.load(open(output_dir + 'usr2vec_user_docs.pkl', 'rb'))
-        return tmp['couples'], tmp['labels']
-    else:
-        uids = list(user_docs.keys())
-        np.random.shuffle(uids)
-        couples = []
-        labels = []
+    uids = list(user_docs.keys())
+    # np.random.shuffle(uids)
+    user_doc_concepts = []
+    user_doc_labels = []
 
-        for uid in uids:
-            for doc in user_docs[uid]:
-                doc_couples, doc_labels = user_word_sampler(
-                    uid=uid, sequence=doc, vocab_size=vocab_size, negative_samples=negative_samples
-                )
+    for uidx, uid in tqdm(enumerate(uids)):
+        user_concepts = list(itertools.chain.from_iterable(user_docs[uid]['concepts']))
+        user_concepts_set = set(user_concepts)
+        concept_negative_space = [
+            concept_tkn[concept] for concept in concept_tkn if concept not in user_concepts_set]
+        user_concepts = [concept_tkn[concept] for concept in user_concepts if concept in concept_tkn]
 
-                couples.extend(doc_couples)
-                labels.extend(doc_labels)
+        for doc_id in user_docs[uid]['docs']:
+            doc = all_docs[doc_id]
+            # doc = word_tkn.texts_to_sequences([doc])[0]
+            doc_couples, doc_labels = user_word_sampler(
+                uid=user_encoder[uid], sequence=doc,
+                tokenizer=word_tkn, negative_samples=negative_samples
+            )
 
-        couples = np.asarray(couples, dtype=object)
-        labels = np.asarray(labels)
+            for idx in range(len(doc_labels)):
+                if doc_labels[idx] == 1:
+                    doc_couples[idx].append(np.random.choice(user_concepts))
+                else:  # negative samples
+                    doc_couples[idx].append(np.random.choice(concept_negative_space))
+            user_doc_concepts.extend(doc_couples)
+            user_doc_labels.extend(doc_labels)
 
-        tmp = {
-            'couples': couples,
-            'labels': labels
-        }
-        with open(output_dir + 'usr2vec_user_docs.pkl', 'wb') as wfile:
-            pickle.dump(tmp, wfile)
-        del tmp
+    user_doc_concepts = np.asarray(user_doc_concepts, dtype=object)
+    user_doc_labels = np.asarray(user_doc_labels)
 
-        return couples, labels
+    tmp = {
+        'user_doc_concepts': user_doc_concepts,
+        'user_doc_labels': user_doc_labels,
+    }
+    with open(output_dir + 'usr2vec_user_docs.pkl', 'wb') as wfile:
+        pickle.dump(tmp, wfile)
+    del tmp
+
+    return user_doc_concepts, user_doc_labels
 
 
-def user_doc_generator(couples, labels, batch_size):
+def user_doc_generator(user_words_concepts, doc_labels, batch_size):
     # shuffle the dataset
-    rand_indices = list(range(len(labels)))
+    rand_indices = list(range(len(doc_labels)))
     np.random.shuffle(rand_indices)
-    couples = couples[rand_indices]
-    labels = labels[rand_indices]
+    user_words_concepts = user_words_concepts[rand_indices]
+    doc_labels = doc_labels[rand_indices]
 
-    steps = len(labels) // batch_size
-    if len(labels) % batch_size != 0:
+    steps = len(doc_labels) // batch_size
+    if len(doc_labels) % batch_size != 0:
         steps += 1
 
     for idx in range(steps):
-        yield couples[batch_size * idx: batch_size * (idx + 1)], labels[batch_size * idx: batch_size * (idx + 1)]
+        yield user_words_concepts[batch_size * idx: batch_size * (idx + 1)], \
+              doc_labels[batch_size * idx: batch_size * (idx + 1)]
 
 
 # design model
@@ -118,15 +131,15 @@ def build_model(params=None):
     if os.path.exists(params['concept_emb_path']):
         weights = np.load(params['concept_emb_path'])
         concept_emb = keras.layers.Embedding(
-            params['vocab_size'], weights.shape[1],
+            params['concept_size'], weights.shape[1],
             weights=[weights],
-            trainable=params['word_emb_train'], name='concept_emb',
+            trainable=True, name='concept_emb',
             input_length=1,
         )
     else:
         concept_emb = keras.layers.Embedding(
             params['concept_size'], params['emb_dim'],
-            trainable=params['word_emb_train'], name='concept_emb',
+            trainable=True, name='concept_emb',
             input_length=1,
         )
 
@@ -149,11 +162,12 @@ def build_model(params=None):
     concept_rep = concept_emb(concept_input)
 
     if word_emb.output_dim != params['emb_dim']:
-        projector = keras.layers.Dense(
-            params['emb_dim'], activation='sigmoid', name='dimension_transform'
-        )
-        word_rep = projector(word_rep)
-        concept_rep = projector(concept_rep)
+        word_rep = keras.layers.Dense(
+            params['emb_dim'], activation='sigmoid', name='word_transform'
+        )(word_rep)
+        concept_rep = keras.layers.Dense(
+            params['emb_dim'], activation='sigmoid', name='concept_transform'
+        )(concept_rep)
 
     user_word_dot = keras.layers.dot(
         [user_rep, word_rep], axes=-1
@@ -184,7 +198,12 @@ def build_model(params=None):
         outputs=[user_pred, concept_pred]
     )
     ud_model.compile(
-        loss='binary_crossentropy', optimizer=optimizer)
+        loss='binary_crossentropy', optimizer=optimizer,
+        loss_weights={
+            'concept_pred': params['concept_task_weight'],
+            'user_pred': params['word_task_weight']
+        }
+    )
     print(ud_model.summary())
 
     return ud_model
@@ -265,31 +284,38 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         'concept_emb_path': '../resources/embedding/{}/{}_concept_emb.npy'.format(data_name, data_name),
         'word_emb_train': False,
         'user_emb_train': True,
-        'user_task_weight': 1,
+        'word_task_weight': 1,
+        'concept_task_weight': .3,
         'epochs': 10,
         'optimizer': 'adam',
-        'lr': 1e-4,
+        'lr': 3e-5,
         'negative_sample': 3,
         'max_len': 512,
     }
 
     # load user encoder, which convert users into indices
     concept_tkn = pickle.load(open(params['concept_tkn'], 'rb'))
-    user_docs, _ = data_loader(params['data_path'])
+    params['concept_size'] = len(concept_tkn)
     user_encoder = json.load(open(encode_directory + 'user_encoder.json'))
-
     # update user information
     params['user_size'] = len(user_encoder) + 1
-    if not os.path.exists(encode_directory + 'user_encoder.json'):
-        json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))
+
+    if not os.path.exists(odirectory + 'usr2vec_user_docs.pkl'):
+        user_docs, all_docs = data_loader(params['data_path'])  # omit all documents
+        print('Tokenizing Documents...')
+        all_docs = tok.texts_to_sequences(all_docs)
+        # build datasets
+        user_words_concepts, doc_labels = user_doc_concept_builder(
+            user_docs, all_docs, tok, concept_tkn, user_encoder,
+            negative_samples=params['negative_sample'], output_dir=odirectory
+        )
+    else:
+        tmp = pickle.load(open(odirectory + 'usr2vec_user_docs.pkl', 'rb'))
+        user_words_concepts = tmp['user_doc_concepts']
+        doc_labels = tmp['user_doc_labels']
 
     if not os.path.exists('../resources/embedding/{}/'.format(data_name)):
         os.mkdir('../resources/embedding/{}/'.format(data_name))
-
-    # build datasets
-    user_words, labels = user_doc_builder(
-        user_docs, tok.num_words, negative_samples=params['negative_sample'], output_dir=odirectory
-    )
 
     # build embedding model
     if not os.path.exists(params['word_emb_path']):
@@ -305,9 +331,9 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         loss = 0
 
         train_iter = user_doc_generator(
-            user_words, labels, params['batch_size']
+            user_words_concepts, doc_labels, params['batch_size']
         )
-        total_steps = len(labels) // params['batch_size']
+        total_steps = len(doc_labels) // params['batch_size']
 
         for step, train_batch in tqdm(enumerate(train_iter), total=total_steps):
             '''user info, uw: user-word'''
@@ -316,10 +342,18 @@ def main(data_name, encode_directory, odirectory='../resources/'):
             ud_labels = np.array(ud_labels, dtype=np.int32)
 
             '''Train'''
-            loss += ud_model.train_on_batch(ud_pairs, ud_labels)
+            train_loss = ud_model.train_on_batch(
+                x=ud_pairs,
+                # share labels
+                y={
+                    'user_pred': ud_labels,
+                    'concept_pred': ud_labels
+                }
+            )
+            loss += train_loss[0]
 
             loss_avg = loss / (step + 1)
-            if step % 100 == 0:
+            if (step+1) % 100 == 0:
                 print('Epoch: {}, Step: {}'.format(epoch, step))
                 print('\tLoss: {}.'.format(loss_avg))
                 # print('Remaining Steps: ', round((step + 1) / total_steps, 2))

@@ -155,11 +155,11 @@ def user_word_sampler(uid, sequence, tokenizer, filter_words=None, negative_samp
         if wid in word_set:
             continue
         norm_probs[wid] = tokenizer.word_counts[tokenizer.index_word[wid]]**.75
-    scaling = int(np.ceil(1./min(norm_probs)))
-    norm_probs *= scaling
+    # scaling = int(np.ceil(1./min(norm_probs)))
+    # norm_probs *= scaling
     norm_probs_sum = sum(norm_probs)
-    norm_probs /= norm_probs_sum
-    negative_set = [item for item in range(tokenizer.num_words) if item not in word_set]
+    norm_probs = [item/norm_probs_sum for item in norm_probs]
+    negative_set = [item for item in range(tokenizer.num_words)]
     num_negative_samples = int(len(labels) * negative_samples)
 
     if negative_samples > 0:
@@ -175,11 +175,11 @@ def user_word_sampler(uid, sequence, tokenizer, filter_words=None, negative_samp
             labels.append(0)
 
     # shuffle
-    seed = np.random.randint(0, int(10e6))
-    np.random.seed(seed)
-    np.random.shuffle(couples)
-    np.random.seed(seed)
-    np.random.shuffle(labels)
+    # seed = np.random.randint(0, int(10e6))
+    # np.random.seed(seed)
+    # np.random.shuffle(couples)
+    # np.random.seed(seed)
+    # np.random.shuffle(labels)
     return couples, labels
 
 

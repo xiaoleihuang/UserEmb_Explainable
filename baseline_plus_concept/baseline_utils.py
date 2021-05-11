@@ -129,54 +129,58 @@ def sample_decay(count, decay=2):
     return 1 / (1 + decay * count)
 
 
-def user_word_sampler(uid, sequence, vocab_size, filter_words=None, negative_samples=1):
+def user_word_sampler(uid, sequence, tokenizer, filter_words=None, negative_samples=1):
     """This function was partially adopted from
     https://github.com/keras-team/keras-preprocessing/blob/master/keras_preprocessing/sequence.py#L151
-
-        uid (int): a user id index
-        sequence (list): a sequence of word indices
-        vocab_size (int): word vocabulary size
     """
     couples = []
     labels = []
     word_set = set(sequence)
+    if filter_words:
+        word_set = word_set.union(filter_words)
 
     sample_size = 256
-    # for wid in sequence:
-    for wid in set(sequence):  # to reduce number of training instances, rush for conference deadline
-        couples.append([uid, wid])
-        labels.append(1)
+    # to reduce number of training instances
+    sequence = set(sequence)
+    couples.extend([[uid, wid] for wid in sequence])
+    labels.extend([1] * len(sequence))
 
     if len(couples) > sample_size:  # rush for conference deadline
         sample_indices = list(np.random.choice(list(range(len(labels))), size=sample_size, replace=False))
-        couples = np.asarray(couples)
-        labels = np.asarray(labels)
-        couples = list(couples[sample_indices])
-        labels = list(labels[sample_indices])
+        couples = [couples[sample_idx] for sample_idx in sample_indices]
+        labels = [labels[sample_idx] for sample_idx in sample_indices]
+
+    # norm_probs = [0] * tokenizer.num_words
+    # for wid in tokenizer.index_word:
+    #     if wid > tokenizer.num_words-1:
+    #         continue
+    #     if wid in word_set:
+    #         continue
+    #     norm_probs[wid] = tokenizer.word_counts[tokenizer.index_word[wid]]**.75
+    # # scaling = int(np.ceil(1./min(norm_probs)))
+    # # norm_probs *= scaling
+    # norm_probs_sum = sum(norm_probs)
+    # norm_probs = [item/norm_probs_sum for item in norm_probs]
+    negative_set = [item for item in range(tokenizer.num_words)]
+    num_negative_samples = int(len(labels) * negative_samples)
 
     if negative_samples > 0:
-        num_negative_samples = int(len(labels) * negative_samples)
-
-        for idx in range(num_negative_samples):
-            # 0 is placeholder, starts by 1
-            wid = np.random.randint(1, vocab_size - 1)
-            while wid in word_set:
-                wid = np.random.randint(1, vocab_size - 1)
-
-            # ensure user did not use the word
-            if filter_words:
-                while wid in filter_words and len(filter_words) <= vocab_size:
-                    wid = np.random.randint(1, vocab_size - 1)
-
-            couples.append([uid, wid])
-            labels.append(0)
+        wid_list = np.random.choice(
+            negative_set,
+            size=num_negative_samples,
+            # p=norm_probs
+        )
+        # 0 is placeholder, starts by 1
+        # ensure user did not use the word
+        couples.extend([[uid, wid] for wid in wid_list])
+        labels.extend([0] * len(wid_list))
 
     # shuffle
-    seed = np.random.randint(0, int(10e6))
-    np.random.seed(seed)
-    np.random.shuffle(couples)
-    np.random.seed(seed)
-    np.random.shuffle(labels)
+    # seed = np.random.randint(0, int(10e6))
+    # np.random.seed(seed)
+    # np.random.shuffle(couples)
+    # np.random.seed(seed)
+    # np.random.shuffle(labels)
     return couples, labels
 
 

@@ -201,9 +201,9 @@ def get_free_gpu():
     return np.argmax(memory_available)
 
 
-def data_loader():
-    
-    pass
+def data_loader(dpath):
+    loaded_data = pickle.load(open(dpath, 'rb'))
+    return loaded_data[0], loaded_data[1]  # user_corpus, all_docs
 
 
 if __name__ == '__main__':

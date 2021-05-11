@@ -12,7 +12,7 @@ from gensim.models.doc2vec import Doc2Vec
 # from keras.preprocessing.sequence import pad_sequences
 # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # for cpu usage
 # os.environ["CUDA_VISIBLE_DEVICES"] = ""
-from baseline_utils import user_word_sampler
+from baseline_utils import user_word_sampler, data_loader
 
 
 def user_doc_builder(user_docs, vocab_size, negative_samples=1, output_dir=''):
@@ -115,6 +115,21 @@ def build_model(params=None):
             input_length=1,
         )
 
+    if os.path.exists(params['concept_emb_path']):
+        weights = np.load(params['concept_emb_path'])
+        concept_emb = keras.layers.Embedding(
+            params['vocab_size'], weights.shape[1],
+            weights=[weights],
+            trainable=params['word_emb_train'], name='concept_emb',
+            input_length=1,
+        )
+    else:
+        concept_emb = keras.layers.Embedding(
+            params['concept_size'], params['emb_dim'],
+            trainable=params['word_emb_train'], name='concept_emb',
+            input_length=1,
+        )
+
     # load weights if user embedding path is given
     if os.path.exists(params['user_emb_path']):
         user_emb = keras.layers.Embedding(
@@ -131,7 +146,7 @@ def build_model(params=None):
     '''User Word Dot Production'''
     user_rep = user_emb(user_input)
     word_rep = word_emb(word_input)
-    concept_rep = word_emb(concept_input)
+    concept_rep = concept_emb(concept_input)
 
     if word_emb.output_dim != params['emb_dim']:
         projector = keras.layers.Dense(
@@ -168,7 +183,8 @@ def build_model(params=None):
         inputs=[user_input, word_input, concept_input],
         outputs=[user_pred, concept_pred]
     )
-    ud_model.compile(loss='binary_crossentropy', optimizer=optimizer)
+    ud_model.compile(
+        loss='binary_crossentropy', optimizer=optimizer)
     print(ud_model.summary())
 
     return ud_model
@@ -217,7 +233,6 @@ def build_emb_layer(tokenizer, emb_path, save_path):
         raise ValueError('Current other formats are not supported!')
 
 
-# TODO: add concept support
 def main(data_name, encode_directory, odirectory='../resources/'):
     # load tokenizer
     if os.path.exists(encode_directory + data_name + '.tkn'):
@@ -241,11 +256,13 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         'user_size': -1,  # +1 for unknown
         'emb_dim': 300,
         'dp_rate': .2,
+        'data_path': '../resources/embedding/{}/caue_gru/user_docs_concepts.pkl'.format(data_name),
         'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
         'concept_dir': encode_directory + 'concepts/',
         'concept_tkn': encode_directory + 'concept_tkn.pkl',
         'word_emb_path': '../resources/embedding/{}/word_emb.npy'.format(data_name),
         'user_emb_path': '../resources/embedding/{}/user_emb.npy'.format(data_name),
+        'concept_emb_path': '../resources/embedding/{}/{}_concept_emb.npy'.format(data_name, data_name),
         'word_emb_train': False,
         'user_emb_train': True,
         'user_task_weight': 1,
@@ -258,44 +275,8 @@ def main(data_name, encode_directory, odirectory='../resources/'):
 
     # load user encoder, which convert users into indices
     concept_tkn = pickle.load(open(params['concept_tkn'], 'rb'))
-    user_concepts = {
-        'user': dict(),
-        'all_concepts': set(),
-    }
-    for filep in os.listdir(params['concept_dir']):
-        concepts = pickle.load(open(params['concept_dir'] + filep, 'rb'))
-        uid = filep.split('_')[0]
-        if uid not in user_concepts['user']:
-            user_concepts['user'][uid] = []
-
-        for concept in concepts:
-            encoded_concept = tok.texts_to_sequences([concept.lower()])[0]
-            user_concepts['user'][uid].extend(encoded_concept)
-            user_concepts['all_concepts'].update(encoded_concept)
-
-    if os.path.exists(odirectory + 'train_corpus.pkl') and \
-            os.path.exists(encode_directory + 'user_encoder.json'):
-        user_corpus = pickle.load(open(odirectory + 'train_corpus.pkl', 'rb'))
-        user_encoder = json.load(open(encode_directory + 'user_encoder.json'))
-    else:
-        user_corpus = dict()
-        user_encoder = dict()
-        with open(encode_directory + data_name + '.json') as dfile:
-            for idx, line in enumerate(dfile):
-                user_info = json.loads(line)
-                user_info['uid'] = str(user_info['uid'])
-                if user_info['uid'] not in user_encoder:
-                    user_encoder[user_info['uid']] = len(user_encoder)
-                user_info['uid'] = user_encoder[user_info['uid']]
-
-                user_corpus[user_info['uid']] = []
-
-                for doc in user_info['docs']:
-                    user_corpus[user_info['uid']].append(
-                        tok.texts_to_sequences([doc['text']])[0][:params['max_len']]
-                    )
-        pickle.dump(user_corpus, open(odirectory + 'train_corpus.pkl', 'wb'))
-        json.dump(user_encoder, open(encode_directory + 'user_encoder.json', 'w'))
+    user_docs, _ = data_loader(params['data_path'])
+    user_encoder = json.load(open(encode_directory + 'user_encoder.json'))
 
     # update user information
     params['user_size'] = len(user_encoder) + 1
@@ -307,7 +288,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
 
     # build datasets
     user_words, labels = user_doc_builder(
-        user_corpus, tok.num_words, negative_samples=params['negative_sample'], output_dir=odirectory
+        user_docs, tok.num_words, negative_samples=params['negative_sample'], output_dir=odirectory
     )
 
     # build embedding model

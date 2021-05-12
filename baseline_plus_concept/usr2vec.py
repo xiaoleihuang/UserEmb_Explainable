@@ -131,7 +131,7 @@ def build_model(params=None):
     if os.path.exists(params['concept_emb_path']):
         weights = np.load(params['concept_emb_path'])
         concept_emb = keras.layers.Embedding(
-            params['concept_size'], weights.shape[1],
+            weights.shape[0], weights.shape[1],
             weights=[weights],
             trainable=True, name='concept_emb',
             input_length=1,
@@ -270,7 +270,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         del all_docs
 
     params = {
-        'batch_size': 64,
+        'batch_size': 512,  # to accelerate training speed
         'vocab_size': tok.num_words,
         'user_size': -1,  # +1 for unknown
         'emb_dim': 300,
@@ -281,7 +281,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
         'concept_tkn': encode_directory + 'concept_tkn.pkl',
         'word_emb_path': '../resources/embedding/{}/word_emb.npy'.format(data_name),
         'user_emb_path': '../resources/embedding/{}/user_emb.npy'.format(data_name),
-        'concept_emb_path': '../resources/embedding/{}/{}_concept_emb.npy'.format(data_name, data_name),
+        'concept_emb_path': '../resources/embedding/{}/caue_gru/{}_concept_emb.npy'.format(data_name, data_name),
         'word_emb_train': False,
         'user_emb_train': True,
         'word_task_weight': 1,
@@ -295,7 +295,7 @@ def main(data_name, encode_directory, odirectory='../resources/'):
 
     # load user encoder, which convert users into indices
     concept_tkn = pickle.load(open(params['concept_tkn'], 'rb'))
-    params['concept_size'] = len(concept_tkn)
+    # params['concept_size'] = len(concept_tkn)
     user_encoder = json.load(open(encode_directory + 'user_encoder.json'))
     # update user information
     params['user_size'] = len(user_encoder) + 1
@@ -359,10 +359,10 @@ def main(data_name, encode_directory, odirectory='../resources/'):
                 # print('Remaining Steps: ', round((step + 1) / total_steps, 2))
                 print('-------------------------------------------------')
 
-    # save the model
-    ud_model.save(odirectory + 'ud_model.h5')
-    # save the user embedding
-    np.save(odirectory + 'user.npy', ud_model.get_layer(name='user_emb').get_weights()[0])
+        # save the model
+        ud_model.save(odirectory + 'ud_model.h5')
+        # save the user embedding
+        np.save(odirectory + 'user.npy', ud_model.get_layer(name='user_emb').get_weights()[0])
 
 
 if __name__ == '__main__':

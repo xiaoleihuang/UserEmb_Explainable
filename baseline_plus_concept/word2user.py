@@ -81,14 +81,13 @@ class Word2User(object):
                 Path of output path for user vectors
         """
         ofile = open(opath, 'w')
-
         # load the datasets from caue_gru task
         user_docs, all_docs = data_loader(data_path)
 
         for tid in tqdm(list(user_docs.keys())):
-            # encode the document by word2vec
-            docs = list(itertools.chain.from_iterable([all_docs[doc_id] for doc_id in user_docs[tid]['docs']]))
-            docs = [doc.split() for doc in docs]
+            # encode the document by word2vec TODO
+            # docs = list(itertools.chain.from_iterable([all_docs[doc_id] for doc_id in user_docs[tid]['docs']]))
+            docs = [all_docs[doc_id].split() for doc_id in user_docs[tid]['docs']]
             docs = list(itertools.chain.from_iterable(docs))
             concepts = list(itertools.chain.from_iterable(user_docs[tid]['concepts']))
 

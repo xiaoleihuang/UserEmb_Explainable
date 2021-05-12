@@ -112,8 +112,8 @@ def build_concept_weights(params):
 
     # save the extracted embedding weights
     np.save(params['concept_emb_path'], emb_model)
-    if len(concept_tkn) != len(emb_model):
-        pickle.dump(concept_tkn, open(params['concept_tkn_path'], 'wb'))
+    # if len(concept_tkn) != len(emb_model):
+    #     pickle.dump(concept_tkn, open(params['concept_tkn_path'], 'wb'))
 
 
 def build_emb_weights(tokenizer, emb_path, save_path):

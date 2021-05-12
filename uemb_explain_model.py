@@ -48,7 +48,7 @@ def build_gru_model(params=None):
     if os.path.exists(params['word_emb_path']):
         weights = np.load(params['word_emb_path'])
         word_emb = keras.layers.Embedding(
-            params['vocab_size']+1, weights.shape[1],
+            weights.shape[0], weights.shape[1],
             weights=[weights],
             trainable=params['word_emb_train'], name='word_emb'
         )
@@ -62,21 +62,22 @@ def build_gru_model(params=None):
     if os.path.exists(params['concept_emb_path']):
         weights = np.load(params['concept_emb_path'])
         concept_emb = keras.layers.Embedding(
-            params['vocab_size'], weights.shape[1],
+            weights.shape[0], weights.shape[1],
             weights=[weights],
-            trainable=params['word_emb_train'], name='concept_emb'
+            trainable=True, name='concept_emb'
         )
     else:
         concept_emb = keras.layers.Embedding(
             params['vocab_size'], params['emb_dim'],
-            trainable=params['word_emb_train'], name='concept_emb'
+            trainable=True, name='concept_emb'
         )
 
     # load weights if user embedding path is given
     if 'pretrained_uemb' in params and os.path.exists(params['pretrained_uemb']):
+        weights = np.load(params['pretrained_uemb'])
         user_emb = keras.layers.Embedding(
-            params['user_size'], params['emb_dim'],
-            weights=[np.load(params['pretrained_uemb'])],
+            weights.shape[0], weights.shape[1],
+            weights=[weights],
             trainable=params['user_emb_train'], name='user_emb'
         )
     else:

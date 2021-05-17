@@ -215,6 +215,11 @@ def qual_concepts_sim(**kwargs):
 def dummy_func(doc):
     if type(doc) == str:
         return word_tokenize(doc)
+    if type(doc) == list:
+        tmp_doc = []
+        for concept in doc:
+            tmp_doc.extend(concept.split())
+        return tmp_doc
     return doc
 
 
@@ -257,7 +262,6 @@ def quant_concepts_sim(**kwargs):
     num_label = 10  # only experiment with top 10 labels
     top_labels = [item[0] for item in data_stats['tag_stats']]
     top_labels = top_labels[:num_label]  # 2nd element is label occurrence
-    # num_epochs = 15
 
     if os.path.exists(odir + 'user_docs_{}.pkl'.format(task_name)):
         user_docs = pickle.load(open(odir + 'user_docs_{}.pkl'.format(task_name), 'rb'))
@@ -298,18 +302,13 @@ def quant_concepts_sim(**kwargs):
             pickle.dump(user_docs, wfile)
 
     uids = list(user_docs.keys())
-    # for uid in uids:
-    #     if sum(user_docs[uid]['label']) == 10 or 0:
-    #         print(user_docs[uid]['label'])
-    # import sys
-    # sys.exit()
     np.random.shuffle(uids)
 
     if os.path.exists(odir + 'vectorizer_doc_{}.pkl'.format(task_name)):
         vect_doc = pickle.load(open(odir + 'vectorizer_doc_{}.pkl'.format(task_name), 'rb'))
     else:
         vect_doc = TfidfVectorizer(
-            max_features=10000, tokenizer=dummy_func, preprocessor=dummy_func)
+            max_features=10000, tokenizer=dummy_func, preprocessor=dummy_func, norm='l1')
         vect_doc.fit([user_docs[uid]['doc'] for uid in user_docs])
         with open(odir + 'vectorizer_doc_{}.pkl'.format(task_name), 'wb') as wfile:
             pickle.dump(vect_doc, wfile)
@@ -317,7 +316,8 @@ def quant_concepts_sim(**kwargs):
     if os.path.exists(odir + 'vectorizer_concept_{}.pkl'.format(task_name)):
         vect_concept = pickle.load(open(odir + 'vectorizer_concept_{}.pkl'.format(task_name), 'rb'))
     else:
-        vect_concept = TfidfVectorizer(max_features=10000, tokenizer=dummy_func, preprocessor=dummy_func)
+        vect_concept = TfidfVectorizer(
+            max_features=10000, tokenizer=dummy_func, preprocessor=dummy_func, norm='l1')
         vect_concept.fit([user_docs[uid]['entity'] for uid in user_docs])
         with open(odir + 'vectorizer_concept_{}.pkl'.format(task_name), 'wb') as wfile:
             pickle.dump(vect_concept, wfile)
@@ -458,10 +458,10 @@ if __name__ == '__main__':
     )
 
     # another analysis perspective
-    # qual_concepts_sim(
-    #     corpus_path=data_path,
-    #     concept_dir=concet_dir,
-    #     data_stats_path=output_dir + '{}_stats.json'.format(dname, dname),
-    #     output_dir=qual_odir,
-    #     task_name=dname,
-    # )
+    qual_concepts_sim(
+        corpus_path=data_path,
+        concept_dir=concet_dir,
+        data_stats_path=output_dir + '{}_stats.json'.format(dname, dname),
+        output_dir=qual_odir,
+        task_name=dname,
+    )

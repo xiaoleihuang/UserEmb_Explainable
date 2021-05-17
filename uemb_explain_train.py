@@ -589,6 +589,20 @@ def main(params):
                 params['odir'] + 'user_{}.npy'.format(epoch),
                 caue_model.uemb.weight.cpu().detach().numpy()
             )
+
+    # save the user embedding and the model
+    if params['use_keras'] and params['method'] == 'caue_gru':
+        caue_model.save(params['odir'] + '{}.model'.format(params['method']))
+        np.save(
+            params['odir'] + 'user.npy',
+            caue_model.get_layer(name='user_emb').get_weights()[0]
+        )
+    else:
+        torch.save(caue_model, params['odir'] + '{}.pth'.format(params['method']))
+        np.save(
+            params['odir'] + 'user.npy',
+            caue_model.uemb.weight.cpu().detach().numpy()
+        )
     writer.close()
 
 
@@ -657,7 +671,7 @@ if __name__ == '__main__':
         'user_stats_path': data_dir + 'user_encoder.json',
         'concept_dir': data_dir + 'concepts/',
         'emb_path': '/data/models/BioWordVec_PubMed_MIMICIII_d200.vec.bin',
-        'word_emb_train': False,
+        'word_emb_train': True,
         'word_emb_path': odir + 'word_emb.npy'.format(args.dname),
         'user_emb_path': odir + 'user_emb.npy'.format(args.dname),
         'user_emb_train': True,

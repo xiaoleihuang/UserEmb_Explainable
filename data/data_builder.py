@@ -17,6 +17,7 @@ import sys
 import subprocess
 import tempfile
 import logging
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -1292,9 +1293,14 @@ def process_mimic(indir, odir):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('--metamap_home', type=str, help='Home Directory of Your MetaMap')
+    parser.add_argument('--mimic_dir', type=str, help='MIMIC-III Data Directory')
+    args = parser.parse_args()
+
     # flist = ['amazon', 'diabetes', 'mimic']
     output_dir = 'processed_data/'
-    os.environ['METAMAP_HOME'] = '/data/xiaolei/public_mm_lite/'
+    os.environ['METAMAP_HOME'] = args.metamap_home
 
     # amazon health dataset
     # amazon_indir = './data/raw_data/amazon/'
@@ -1310,7 +1316,8 @@ if __name__ == '__main__':
     process_diabetes(diabetes_indir, output_dir + 'diabetes/')
 
     # mimic-iii
-    mimic_indir = '/data/xiaolei/physionet.org/files/mimiciii/1.4/'
+    # '/data/xxx/physionet.org/files/mimiciii/1.4/'
+    mimic_indir = args.mimic_dir
     os.environ['CONCEPT_ODIR'] = './processed_data/{}/concepts/'.format('mimic-iii')
     if not os.path.exists(output_dir + 'mimic-iii/'):
         os.mkdir(output_dir + 'mimic-iii/')

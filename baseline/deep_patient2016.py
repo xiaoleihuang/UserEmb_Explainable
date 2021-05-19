@@ -77,7 +77,7 @@ class Lda2User(object):
         self.ae_path = kwargs['ae_path']
         self.device = kwargs['device']
 
-        self.ae = AE(self.model.num_topics, 500)  # default value in paper
+        self.ae = AE(self.model.num_topics, 300)  # default value in paper
         if not os.path.exists(self.ae_path):
             self.train_autoencoder()
         else:
@@ -94,6 +94,7 @@ class Lda2User(object):
 
         for _ in tqdm(range(10)):
             for idx, batch in enumerate(user_features):
+                optimizer.zero_grad()
                 batch = batch[0]
                 batch.to(self.device)
                 output, _ = self.ae(batch)  # omit encoded features

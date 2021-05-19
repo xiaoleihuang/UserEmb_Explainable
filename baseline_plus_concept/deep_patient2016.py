@@ -10,7 +10,6 @@ encoder: two layers of autoencoder
 """
 import pickle
 import sys
-import json
 import os
 
 import torch
@@ -149,14 +148,11 @@ class Lda2User(object):
         self.ae_path = kwargs['ae_path']
         self.device = kwargs['device']
 
-        self.ae = AE(self.word_model.num_topics, 500)  # default value in paper
-        if not os.path.exists(self.ae_path):
-            self.train_autoencoder()
-        else:
+        self.ae = AE(self.word_model.num_topics, 300)  # default value in paper
+        if os.path.exists(self.ae_path):
             self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
 
-    def train_autoencoder(self):
-        user_features = list(self.lda2user().values())
+    def train_autoencoder(self, user_features):
         user_features = TensorDataset(torch.FloatTensor(user_features))
         user_features = DataLoader(user_features, batch_size=32, shuffle=True)
 
@@ -166,6 +162,7 @@ class Lda2User(object):
 
         for _ in tqdm(range(10)):
             for idx, batch in enumerate(user_features):
+                optimizer.zero_grad()
                 batch = batch[0]
                 batch.to(self.device)
                 output, _ = self.ae(batch)  # omit encoded features
@@ -189,12 +186,12 @@ class Lda2User(object):
         ofile = open(opath, 'w')
         # load the datasets from caue_gru task
         user_docs, all_docs = data_loader(data_path)
+        doc_features = list()
+        concept_features = list()
 
         print('Loading Data')
-        for tid in tqdm(list(user_docs.keys())):
-            # encode the document by lda
-            # docs = list(itertools.chain.from_iterable([all_docs[doc_id] for doc_id in user_docs[tid]['docs']]))
-            docs = [all_docs[doc_id] for doc_id in user_docs[tid]['docs']]
+        for user_id in tqdm(list(user_docs.keys())):
+            docs = [all_docs[doc_id] for doc_id in user_docs[user_id]['docs']]
             doc_vectors = []
             for idx, doc in enumerate(docs):
                 output = self.word_model[self.word_dict.doc2bow(doc.split())]
@@ -203,9 +200,10 @@ class Lda2User(object):
                     doc_vectors[-1][item[0]] = item[1]
             # average the lda inferred documents
             doc_vectors = np.mean(doc_vectors, axis=0)
+            doc_features.append(doc_vectors)
 
             concept_vectors = []
-            for idx, concepts in enumerate(user_docs[tid]['concepts']):
+            for idx, concepts in enumerate(user_docs[user_id]['concepts']):
                 if len(concepts) == 0:
                     continue
                 output = self.concept_model[self.concept_dict.doc2bow(concepts)]
@@ -214,62 +212,23 @@ class Lda2User(object):
                     concept_vectors[-1][item[0]] = item[1]
             # average the lda inferred documents
             concept_vectors = np.mean(concept_vectors, axis=0)
+            concept_features.append(concept_vectors)
 
+        # train autoencoder if the model does not exist
+        if not os.path.exists(self.ae_path):
+            self.train_autoencoder(doc_features)
+            self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
+
+        # convert the doc features by the autoencoder.
+        _, doc_features = self.ae(doc_features)
+        doc_features = doc_features.cpu().detach().numpy()
+
+        for idx, user_id in enumerate(list(user_docs.keys())):
             # write to file
-            ofile.write(tid + '\t' + ' '.join(map(
-                str, np.concatenate((doc_vectors, concept_vectors), axis=None))) + '\n')
-
+            ofile.write(user_id + '\t' + ' '.join(map(
+                str, np.concatenate((doc_features[idx], concept_features[idx]), axis=None))) + '\n')
         ofile.flush()
         ofile.close()
-
-    def lda2user(self, mode='average'):
-        """Extract user vectors from the given data path
-
-            Parameters
-            ----------
-            mode: str
-                Methods to combine document representations
-        """
-        item_dict = dict()
-
-        print('Loading Data')
-        with open(self.data_path) as dfile:
-            for line in dfile:
-                user = json.loads(line)
-                if user['uid'] not in item_dict:
-                    item_dict[user['uid']] = []
-                for doc_entity in user['docs']:
-                    # collect data
-                    if mode == 'average':
-                        item_dict[user['uid']].append(doc_entity['text'].split())
-                    else:
-                        if len(item_dict[user['uid']]) == 0:
-                            item_dict[user['uid']].append(doc_entity['text'].split())
-                        else:
-                            item_dict[user['uid']][0].extend(doc_entity['text'].split())
-
-        for uid in list(item_dict.keys()):
-            # encode the document by lda
-            for idx, doc in enumerate(item_dict[uid]):
-                output = self.word_model[self.word_dict.doc2bow(doc)]
-                item_dict[uid][idx] = [0.] * self.word_model.num_topics
-                for item in output:
-                    item_dict[uid][idx][item[0]] = item[1]
-            # average the lda inferred documents
-            item_dict[uid] = np.mean(item_dict[uid], axis=0)
-
-        return item_dict
-
-    def inference(self, user_features=None):
-        self.ae.eval()
-        if not user_features:
-            user_features = self.lda2user()
-        if not torch.is_tensor(user_features):
-            user_features = torch.FloatTensor(user_features)
-
-        _, user_embs = self.ae(user_features)
-        user_embs = user_embs.cpu().detach().numpy()
-        return user_embs
 
 
 if __name__ == '__main__':
@@ -296,6 +255,17 @@ if __name__ == '__main__':
     concept_dict_path = odir + 'concept_lda_dict.pkl'
     autoencoder_path = task_dir + 'ae_model.pth'
 
+    if os.path.exists(concept_model_path) and os.path.exists(concept_dict_path):
+        pass
+    else:
+        print('Training Concept LDA Models...')
+        user_data, lda_docs = data_loader(task_data_path)
+        clist = []
+        for uid in user_data:
+            clist.extend([concepts for concepts in user_data[uid]['concepts'] if len(concepts) > 0])
+        train_concept_lda(concept_list=clist, output_dir=odir, dim=300)
+        train_lda(docs=lda_docs, output_dir=odir, dim=300)
+
     # auto encoder 2 user
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -303,18 +273,8 @@ if __name__ == '__main__':
         device = torch.device('cpu')
 
     l2u = Lda2User(
-        task_name=task, dictionary_path=dict_path, lda_path=model_path,
+        task_name=task, word_dict_path=word_dict_path, word_model_path=word_model_path,
+        concept_dict_path=concept_dict_path, concept_model_path=concept_model_path,
         data_path=task_data_path, ae_path=autoencoder_path, device=device
     )
-
-    # user vectors
-    user_topics = l2u.lda2user(mode='average')
-    ufeatures = l2u.inference(list(user_topics.values()))
-    user_topics = dict(zip(list(user_topics.keys()), ufeatures))
-
-    # write to file
-    wfile = open(opath_user, 'w')
-    for tid in list(user_topics.keys()):
-        wfile.write(tid + '\t' + ' '.join(map(str, user_topics[tid])) + '\n')
-    wfile.flush()
-    wfile.close()
+    l2u.lda2item(task_data_path, opath_user)

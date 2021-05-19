@@ -173,8 +173,8 @@ if __name__ == '__main__':
 
     opath_user = odir + 'user.txt'
 
-    dict_path = odir + 'lda_dict.pkl'
-    model_path = odir + 'lda.model'
+    dict_path = task_dir + 'lda_dict.pkl'
+    model_path = task_dir + 'lda.model'
     autoencoder_path = odir + 'ae_model.pth'
 
     # auto encoder 2 user

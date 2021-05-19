@@ -253,7 +253,7 @@ if __name__ == '__main__':
 
     concept_model_path = odir + 'concept_lda.model'
     concept_dict_path = odir + 'concept_lda_dict.pkl'
-    autoencoder_path = task_dir + 'ae_model.pth'
+    autoencoder_path = odir + 'ae_model.pth'
 
     if os.path.exists(concept_model_path) and os.path.exists(concept_dict_path):
         pass

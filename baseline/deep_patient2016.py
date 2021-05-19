@@ -173,9 +173,9 @@ if __name__ == '__main__':
 
     opath_user = odir + 'user.txt'
 
-    dict_path = task_dir + 'lda_dict.pkl'
-    model_path = task_dir + 'lda.model'
-    autoencoder_path = task_dir + 'ae_model.pth'
+    dict_path = odir + 'lda_dict.pkl'
+    model_path = odir + 'lda.model'
+    autoencoder_path = odir + 'ae_model.pth'
 
     # auto encoder 2 user
     if torch.cuda.is_available():

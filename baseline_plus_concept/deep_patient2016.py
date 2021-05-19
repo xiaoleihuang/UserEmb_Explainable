@@ -18,8 +18,81 @@ from torch import nn as nn
 from torch.utils.data import TensorDataset
 from torch.utils.data.dataloader import DataLoader
 from gensim.models import LdaModel
+from gensim.corpora import Dictionary
+from gensim.models.ldamulticore import LdaMulticore
 import numpy as np
 from tqdm import tqdm
+from baseline_utils import data_loader
+
+
+class ConceptCorpus(object):
+    def __init__(self, concept_list, doc2id=False, dictionary=None):
+        """ Load Json file
+        """
+        self.clist = concept_list
+        self.dictionary = dictionary
+        self.doc2id = doc2id
+
+    def __iter__(self):
+        for line in self.clist:
+            if self.doc2id and self.dictionary:  # this is for inference
+                yield self.dictionary.doc2bow(line)
+            else:
+                yield line
+
+
+class RawCorpus(object):
+    def __init__(self, docs, doc2id=False, dictionary=None):
+        """ Load Json file
+        """
+        self.docs = docs
+        self.dictionary = dictionary
+        self.doc2id = doc2id
+
+    def __iter__(self):
+        for line in self.docs:
+            if self.doc2id and self.dictionary:  # this is for inference
+                yield self.dictionary.doc2bow(line.split())
+            else:
+                yield line.split()
+
+
+def train_concept_lda(concept_list, output_dir='../resources/embedding/', dim=300):
+    """
+        The number of topics should be aligned with the dimensions of the user embedding.
+    """
+    # load data and build dictionary
+    corpus = ConceptCorpus(concept_list)
+    dictionary = Dictionary(corpus, prune_at=15000)
+    dictionary.save(output_dir + 'concept_lda_dict.pkl')
+
+    concept_matrix = ConceptCorpus(concept_list, True, dictionary)
+    model = LdaMulticore(
+        concept_matrix, id2word=dictionary, num_topics=dim,
+        passes=10, alpha='symmetric', workers=os.cpu_count()//2
+    )
+    model.save(output_dir + 'concept_lda.model')
+
+
+def train_lda(docs, output_dir, dim=300):
+    """
+        The number of topics should be aligned with the dimensions of the user embedding.
+    """
+
+    if os.path.exists(output_dir + 'lda_dict.pkl'):
+        dictionary = pickle.load(open(output_dir + 'lda_dict.pkl', 'rb'))
+    else:
+        corpus = RawCorpus(docs)
+        dictionary = Dictionary(corpus, prune_at=10000)
+        dictionary.save(output_dir + 'lda_dict.pkl')
+
+    doc_matrix = RawCorpus(docs, True, dictionary)
+
+    model = LdaMulticore(
+        doc_matrix, id2word=dictionary, num_topics=dim,
+        passes=10, alpha='symmetric', workers=os.cpu_count()//2
+    )
+    model.save(output_dir + 'lda.model')
 
 
 class AE(nn.Module):
@@ -69,13 +142,14 @@ class Lda2User(object):
     """
     def __init__(self, **kwargs):
         self.task = kwargs['task_name']
-        self.dictionary = pickle.load(open(kwargs['dictionary_path'], 'rb'))
-        self.model = LdaModel.load(kwargs['lda_path'])
-        self.data_path = kwargs['data_path']
+        self.word_dict = pickle.load(open(kwargs['word_dict_path'], 'rb'))
+        self.concept_dict = pickle.load(open(kwargs['concept_dict_path'], 'rb'))
+        self.word_model = LdaModel.load(kwargs['word_model_path'])
+        self.concept_model = LdaModel.load(kwargs['concept_model_path'])
         self.ae_path = kwargs['ae_path']
         self.device = kwargs['device']
 
-        self.ae = AE(self.model.num_topics, 500)  # default value in paper
+        self.ae = AE(self.word_model.num_topics, 500)  # default value in paper
         if not os.path.exists(self.ae_path):
             self.train_autoencoder()
         else:
@@ -101,6 +175,52 @@ class Lda2User(object):
                 optimizer.step()
 
         torch.save(self.ae.state_dict(), self.ae_path)
+
+    def lda2item(self, data_path, opath):
+        """Extract user vectors from the given data path
+
+            Parameters
+            ----------
+            data_path: str
+                Path of data file, tsv file
+            opath: str
+                Path of output path for user vectors
+        """
+        ofile = open(opath, 'w')
+        # load the datasets from caue_gru task
+        user_docs, all_docs = data_loader(data_path)
+
+        print('Loading Data')
+        for tid in tqdm(list(user_docs.keys())):
+            # encode the document by lda
+            # docs = list(itertools.chain.from_iterable([all_docs[doc_id] for doc_id in user_docs[tid]['docs']]))
+            docs = [all_docs[doc_id] for doc_id in user_docs[tid]['docs']]
+            doc_vectors = []
+            for idx, doc in enumerate(docs):
+                output = self.word_model[self.word_dict.doc2bow(doc.split())]
+                doc_vectors.append([0.] * self.word_model.num_topics)
+                for item in output:
+                    doc_vectors[-1][item[0]] = item[1]
+            # average the lda inferred documents
+            doc_vectors = np.mean(doc_vectors, axis=0)
+
+            concept_vectors = []
+            for idx, concepts in enumerate(user_docs[tid]['concepts']):
+                if len(concepts) == 0:
+                    continue
+                output = self.concept_model[self.concept_dict.doc2bow(concepts)]
+                concept_vectors.append([0.] * self.concept_model.num_topics)
+                for item in output:
+                    concept_vectors[-1][item[0]] = item[1]
+            # average the lda inferred documents
+            concept_vectors = np.mean(concept_vectors, axis=0)
+
+            # write to file
+            ofile.write(tid + '\t' + ' '.join(map(
+                str, np.concatenate((doc_vectors, concept_vectors), axis=None))) + '\n')
+
+        ofile.flush()
+        ofile.close()
 
     def lda2user(self, mode='average'):
         """Extract user vectors from the given data path
@@ -131,8 +251,8 @@ class Lda2User(object):
         for uid in list(item_dict.keys()):
             # encode the document by lda
             for idx, doc in enumerate(item_dict[uid]):
-                output = self.model[self.dictionary.doc2bow(doc)]
-                item_dict[uid][idx] = [0.] * self.model.num_topics
+                output = self.word_model[self.word_dict.doc2bow(doc)]
+                item_dict[uid][idx] = [0.] * self.word_model.num_topics
                 for item in output:
                     item_dict[uid][idx][item[0]] = item[1]
             # average the lda inferred documents
@@ -154,7 +274,7 @@ class Lda2User(object):
 
 if __name__ == '__main__':
     task = sys.argv[1]
-    task_data_path = '../data/processed_data/{}/{}.json'.format(task, task)
+    task_data_path = '../resources/embedding/{}/caue_gru/user_docs_concepts.pkl'.format(task)
 
     baseline_dir = '../resources/embedding/'
     if not os.path.exists(baseline_dir):
@@ -164,13 +284,16 @@ if __name__ == '__main__':
     if not os.path.exists(task_dir):
         os.mkdir(task_dir)
 
-    odir = task_dir + 'deeppatient2user/'
+    odir = task_dir + 'deeppatient2user_concept/'
     if not os.path.exists(odir):
         os.mkdir(odir)
     opath_user = odir + 'user.txt'
 
-    dict_path = task_dir + 'lda_dict.pkl'
-    model_path = task_dir + 'lda.model'
+    word_dict_path = odir + 'lda_dict.pkl'
+    word_model_path = odir + 'lda.model'
+
+    concept_model_path = odir + 'concept_lda.model'
+    concept_dict_path = odir + 'concept_lda_dict.pkl'
     autoencoder_path = task_dir + 'ae_model.pth'
 
     # auto encoder 2 user

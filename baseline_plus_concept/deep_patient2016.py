@@ -220,6 +220,8 @@ class Lda2User(object):
             self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
 
         # convert the doc features by the autoencoder.
+        if not torch.is_tensor(doc_features):
+            doc_features = torch.FloatTensor(doc_features)
         _, doc_features = self.ae(doc_features)
         doc_features = doc_features.cpu().detach().numpy()
 

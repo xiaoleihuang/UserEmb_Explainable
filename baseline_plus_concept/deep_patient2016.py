@@ -145,33 +145,37 @@ class Lda2User(object):
         self.concept_dict = pickle.load(open(kwargs['concept_dict_path'], 'rb'))
         self.word_model = LdaModel.load(kwargs['word_model_path'])
         self.concept_model = LdaModel.load(kwargs['concept_model_path'])
+        self.concept_ae_path = kwargs['concept_ae_path']
         self.ae_path = kwargs['ae_path']
         self.device = kwargs['device']
 
-        self.ae = AE(self.word_model.num_topics, 300)  # default value in paper
+        self.ae = AE(self.word_model.num_topics, 500)  # default value in paper
         if os.path.exists(self.ae_path):
             self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
+        self.concept_ae = AE(self.concept_model.num_topics, 500)  # default value in paper
+        if os.path.exists(self.concept_ae_path):
+            self.ae.load_state_dict(torch.load(self.concept_ae_path), strict=False)
 
-    def train_autoencoder(self, user_features):
+    def train_autoencoder(self, user_features, ae_model, ae_model_path):
         user_features = TensorDataset(torch.FloatTensor(user_features))
         user_features = DataLoader(user_features, batch_size=32, shuffle=True)
 
-        optimizer = torch.optim.Adam(self.ae.parameters(), lr=.001)
+        optimizer = torch.optim.Adam(ae_model.parameters(), lr=.001)
         criterion = torch.nn.BCELoss().to(self.device)
-        self.ae.train()
+        ae_model.train()
 
         for _ in tqdm(range(10)):
             for idx, batch in enumerate(user_features):
                 optimizer.zero_grad()
                 batch = batch[0]
                 batch.to(self.device)
-                output, _ = self.ae(batch)  # omit encoded features
+                output, _ = ae_model(batch)  # omit encoded features
                 loss = criterion(output, batch)
                 loss.backward()
                 # torch.nn.utils.clip_grad_norm_(self.ae.parameters(), 0.1)
                 optimizer.step()
 
-        torch.save(self.ae.state_dict(), self.ae_path)
+        torch.save(ae_model.state_dict(), ae_model_path)
 
     def lda2item(self, data_path, opath):
         """Extract user vectors from the given data path
@@ -216,14 +220,22 @@ class Lda2User(object):
 
         # train autoencoder if the model does not exist
         if not os.path.exists(self.ae_path):
-            self.train_autoencoder(doc_features)
+            self.train_autoencoder(doc_features, self.ae, self.ae_path)
             self.ae.load_state_dict(torch.load(self.ae_path), strict=False)
+        if not os.path.exists(self.concept_ae_path):
+            self.train_autoencoder(concept_features, self.concept_ae, self.concept_ae_path)
+            self.concept_ae.load_state_dict(torch.load(self.concept_ae_path), strict=False)
 
         # convert the doc features by the autoencoder.
         if not torch.is_tensor(doc_features):
             doc_features = torch.FloatTensor(doc_features)
         _, doc_features = self.ae(doc_features)
         doc_features = doc_features.cpu().detach().numpy()
+
+        if not torch.is_tensor(concept_features):
+            concept_features = torch.FloatTensor(concept_features)
+        _, concept_features = self.concept_ae(concept_features)
+        concept_features = concept_features.cpu().detach().numpy()
 
         for idx, user_id in enumerate(list(user_docs.keys())):
             # write to file
@@ -256,6 +268,7 @@ if __name__ == '__main__':
     concept_model_path = odir + 'concept_lda.model'
     concept_dict_path = odir + 'concept_lda_dict.pkl'
     autoencoder_path = odir + 'ae_model.pth'
+    concept_ae_path = odir + 'concept_ae_model.pth'
 
     if os.path.exists(concept_model_path) and os.path.exists(concept_dict_path):
         pass
@@ -277,6 +290,6 @@ if __name__ == '__main__':
     l2u = Lda2User(
         task_name=task, word_dict_path=word_dict_path, word_model_path=word_model_path,
         concept_dict_path=concept_dict_path, concept_model_path=concept_model_path,
-        data_path=task_data_path, ae_path=autoencoder_path, device=device
+        data_path=task_data_path, ae_path=autoencoder_path, concept_ae_path=concept_ae_path, device=device,
     )
     l2u.lda2item(task_data_path, opath_user)

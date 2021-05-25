@@ -456,70 +456,70 @@ def process_concepts(entities):
         except AttributeError:
             continue
         # define filter list
-        if 'qnco' in item['semtypes']:  # filter out Quantitative Concept: per year
-            continue
-        if 'tmco' in item['semtypes']:  # filter out Temporal Concept: day
-            continue
-        if 'hlca' in item['semtypes']:  # Health Care Activity: Hospital admission; Tapering - action;
-            continue
-        if 'idcn' in item['semtypes']:  # Idea or Concept: Presentation
-            continue
-        if 'hcro' in item['semtypes']:  # Health Care Related Organization: Accident and Emergency department
-            continue
-        if 'clna' in item['semtypes']:  # Clinical Attribute: History of present illness
-            continue
-        if 'ftcn' in item['semtypes']:  # Functional Concept: Negation, Extraocular; Due to
-            continue
-        if 'qlco' in item['semtypes']:  # Qualitative Concept: Started
-            continue
-        if 'fndg' in item['semtypes']:  # Finding: Present
-            continue
-        if 'acty' in item['semtypes']:  # Activity: Obscure; Assessed; Departure - action
-            continue
-        if 'mnob' in item['semtypes']:  # Manufactured Object: Machine; Beds
-            continue
-        if 'plnt' in item['semtypes']:  # Plant
-            continue
-        if 'podg' in item['semtypes']:  # Patient or Disabled Group: Patients
-            continue
-        if 'popg' in item['semtypes']:  # Population Group
-            continue
-        if 'prog' in item['semtypes']:  # Professional or Occupational Group: Physicians
-            continue
-        if 'pros' in item['semtypes']:  # Professional Society
-            continue
-        if 'elii' in item['semtypes']:  # Element, Ion, or Isotope: lead
-            continue
-        if 'anim' in item['semtypes']:  # Animal: Show
-            continue
-        if 'inpr' in item['semtypes']:  # Intellectual Product: Code; Telephone Number
-            continue
-        if 'orgf' in item['semtypes']:  # Organism Function: Movement; Expiration, function; Inspiration function
-            continue
-        if 'npop' in item['semtypes']:  # Natural Phenomenon or Process: Saturated
-            continue
-        if 'lang' in item['semtypes']:  # Language: Herero language
-            continue
-        if 'spco' in item['semtypes']:  # Spatial Concept: Scattered; Round shape
-            continue
-        if 'bpoc' in item['semtypes']:  # Body Part, Organ, or Organ Component: Eminence
-            continue
-        if 'phsf' in item['semtypes']:  # Physiologic Function: Respiration
-            continue
-        if 'clas' in item['semtypes']:  # Classification: Trial Phase
-            continue
-        if 'food' in item['semtypes']:  # Food: Food
-            continue
-        if 'orga' in item['semtypes']:  # Organism Attribute: Body Temperature
-            continue
-        if 'cnce' in item['semtypes']:  # Conceptual Entity: System Alert
-            continue
-        if 'ocdi' in item['semtypes']:  # Occupation or Discipline: Science of Chemistry
-            continue
-        if 'resa' in item['semtypes']:  # Research Activity: Diagnosis Study
-            continue
-        if 'lbpr' in item['semtypes']:  # Laboratory Procedure: International Normalized Ratio
-            continue
+        # if 'qnco' in item['semtypes']:  # filter out Quantitative Concept: per year
+        #     continue
+        # if 'tmco' in item['semtypes']:  # filter out Temporal Concept: day
+        #     continue
+        # if 'hlca' in item['semtypes']:  # Health Care Activity: Hospital admission; Tapering - action;
+        #     continue
+        # if 'idcn' in item['semtypes']:  # Idea or Concept: Presentation
+        #     continue
+        # if 'hcro' in item['semtypes']:  # Health Care Related Organization: Accident and Emergency department
+        #     continue
+        # if 'clna' in item['semtypes']:  # Clinical Attribute: History of present illness
+        #     continue
+        # if 'ftcn' in item['semtypes']:  # Functional Concept: Negation, Extraocular; Due to
+        #     continue
+        # if 'qlco' in item['semtypes']:  # Qualitative Concept: Started
+        #     continue
+        # if 'fndg' in item['semtypes']:  # Finding: Present
+        #     continue
+        # if 'acty' in item['semtypes']:  # Activity: Obscure; Assessed; Departure - action
+        #     continue
+        # if 'mnob' in item['semtypes']:  # Manufactured Object: Machine; Beds
+        #     continue
+        # if 'plnt' in item['semtypes']:  # Plant
+        #     continue
+        # if 'podg' in item['semtypes']:  # Patient or Disabled Group: Patients
+        #     continue
+        # if 'popg' in item['semtypes']:  # Population Group
+        #     continue
+        # if 'prog' in item['semtypes']:  # Professional or Occupational Group: Physicians
+        #     continue
+        # if 'pros' in item['semtypes']:  # Professional Society
+        #     continue
+        # if 'elii' in item['semtypes']:  # Element, Ion, or Isotope: lead
+        #     continue
+        # if 'anim' in item['semtypes']:  # Animal: Show
+        #     continue
+        # if 'inpr' in item['semtypes']:  # Intellectual Product: Code; Telephone Number
+        #     continue
+        # if 'orgf' in item['semtypes']:  # Organism Function: Movement; Expiration, function; Inspiration function
+        #     continue
+        # if 'npop' in item['semtypes']:  # Natural Phenomenon or Process: Saturated
+        #     continue
+        # if 'lang' in item['semtypes']:  # Language: Herero language
+        #     continue
+        # if 'spco' in item['semtypes']:  # Spatial Concept: Scattered; Round shape
+        #     continue
+        # if 'bpoc' in item['semtypes']:  # Body Part, Organ, or Organ Component: Eminence
+        #     continue
+        # if 'phsf' in item['semtypes']:  # Physiologic Function: Respiration
+        #     continue
+        # if 'clas' in item['semtypes']:  # Classification: Trial Phase
+        #     continue
+        # if 'food' in item['semtypes']:  # Food: Food
+        #     continue
+        # if 'orga' in item['semtypes']:  # Organism Attribute: Body Temperature
+        #     continue
+        # if 'cnce' in item['semtypes']:  # Conceptual Entity: System Alert
+        #     continue
+        # if 'ocdi' in item['semtypes']:  # Occupation or Discipline: Science of Chemistry
+        #     continue
+        # if 'resa' in item['semtypes']:  # Research Activity: Diagnosis Study
+        #     continue
+        # if 'lbpr' in item['semtypes']:  # Laboratory Procedure: International Normalized Ratio
+        #     continue
 
         # item['index'] = len(results)
         # item['mm'] = entity.mm

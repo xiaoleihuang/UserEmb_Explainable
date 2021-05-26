@@ -36,7 +36,6 @@ This will ensure you follow basic ethic rules to use the datasets. The datasets 
     * But our `data_builder.py` has its built-in supports, but you have to change codes by yourself using `metamap_concepts` or `metamaplite_concepts`.
 * Other dependencies
     * Install [PyTorch](https://pytorch.org/get-started/locally/)
-    * Please check the requirements.txt
 
 # Data Analysis
 Data analysis scripts will be under the folder of `data`. 
@@ -56,10 +55,15 @@ We probe data via two types of analysis aspects, records and concepts.
       * The two scripts will generate necessary data stats and concept vocabularies for training models.
 2. Baselines
     * All baseline models will be under the directory of `./baselines/`;
-    * Run `python any_baseline_script.py` will start to train user embeddings;
+    * Run `python any_baseline_script.py data_name` will start to train user embeddings:
+      * dp2user: `python deep_patient2016.py diabetes` or `python deep_patient2016.py mimic-iii`;
+      * word2user: `python word2user.py diabetes` or `python word2user.py mimic-iii`;
 3. Our approach
     * Run the following script will create entity augmented user representations;
-      * `python Uemb_Explain.py`
+      * We provide a list of running commands in shell scripts;
+        * Go to the jobs folder: `cd ./jobs`;
+        * To train CAUE_GRU for diabetes: `sh run_gru_diabetes.sh`;
+        * To train CAUE_GRU for MIMIC-III: `sh run_gru_mimic.sh`.
 
 # Contact
 

@@ -7,6 +7,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.manifold import TSNE
+import umap
 
 
 def analysis_viz(dpath, data_name='Diabetes'):
@@ -86,7 +87,8 @@ def user_viz_phenotype(data_name, method_name):
                     uembs[uid] = [float(item) for item in line[1].split()]
             uembs = np.asarray(uembs)
 
-        tsne = TSNE(n_components=2, n_jobs=-1)
+        # tsne = TSNE(n_components=2, n_jobs=-1)
+        tsne = umap.UMAP(n_jobs=-1, n_components=2)
         uembs = tsne.fit_transform(uembs)
 
         with open(inpath, 'w') as wfile:

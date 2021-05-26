@@ -198,6 +198,6 @@ if __name__ == '__main__':
 
     for dname in ['diabetes', 'mimic-iii']:
         for method in ['caue_gru', 'user2vec', 'suisil2user']:
-            # user_viz_phenotype(dname, method)
+            user_viz_phenotype(dname, method)
             user_mortality_viz(dname, method)
 

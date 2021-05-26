@@ -121,6 +121,10 @@ def user_viz(data_name, method_name):
 
 
 if __name__ == '__main__':
-    quant_path = '../resources/analyze/quant.csv'
-    for dname in ['Diabetes', 'MIMIC-III']:
-        analysis_viz(quant_path, dname)
+    # quant_path = '../resources/analyze/quant.csv'
+    # for dname in ['Diabetes', 'MIMIC-III']:
+    #     analysis_viz(quant_path, dname)
+
+    for dname in ['diabetes', 'mimic-iii']:
+        for method in ['caue_gru', 'usr2vec', 'suisil2user']:
+            user_viz(dname, method)

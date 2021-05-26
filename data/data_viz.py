@@ -126,5 +126,5 @@ if __name__ == '__main__':
     #     analysis_viz(quant_path, dname)
 
     for dname in ['diabetes', 'mimic-iii']:
-        for method in ['caue_gru', 'usr2vec', 'suisil2user']:
+        for method in ['caue_gru', 'user2vec', 'suisil2user']:
             user_viz(dname, method)

@@ -88,7 +88,7 @@ def user_viz_phenotype(data_name, method_name):
             uembs = np.asarray(uembs)
 
         # tsne = TSNE(n_components=2, n_jobs=-1)
-        tsne = umap.UMAP(n_jobs=-1, n_components=2)
+        tsne = umap.UMAP(n_jobs=-1, n_components=2, n_neighbors=9)
         uembs = tsne.fit_transform(uembs)
 
         with open(inpath, 'w') as wfile:
@@ -165,7 +165,8 @@ def user_mortality_viz(data_name, method_name):
                     uembs[uid] = [float(item) for item in line[1].split()]
             uembs = np.asarray(uembs)
 
-        tsne = TSNE(n_components=2, n_jobs=-1)
+        # tsne = TSNE(n_components=2, n_jobs=-1)
+        tsne = umap.UMAP(n_jobs=-1, n_components=2, n_neighbors=9)
         uembs = tsne.fit_transform(uembs)
 
         with open(inpath, 'w') as wfile:
@@ -199,6 +200,6 @@ if __name__ == '__main__':
     for dname in ['diabetes', 'mimic-iii']:
         for method in ['caue_gru', 'user2vec', 'suisil2user']:
             print('Current job {}, {}'.format(dname, method))
-            user_viz_phenotype(dname, method)
+            # user_viz_phenotype(dname, method)
             user_mortality_viz(dname, method)
 

@@ -68,7 +68,7 @@ def user_viz(data_name, method_name):
             user_tags[uid] = 1 if top_tag in user_info['tags_set'] else 0
 
     # write down the results
-    inpath = './resources/analyze/{}/{}_viz.tsv'.format(data_name, method_name)
+    inpath = '../resources/analyze/{}/{}_viz.tsv'.format(data_name, method_name)
     if not os.path.exists(inpath):
         # load user embeddings
         # load the user embeddings, default to load the user.npy

@@ -50,7 +50,7 @@ def user_viz_phenotype(data_name, method_name):
 
     tag_encoder = dict()
     user_tags = dict()
-    with open(data_dir+data_name + '.json') as dfile:
+    with open(data_dir + data_name + '.json') as dfile:
         for line in dfile:
             user_info = json.loads(line)
             uid = user_encoder[user_info['uid']]
@@ -136,7 +136,7 @@ def user_mortality_viz(data_name, method_name):
     # load tag stats
     tag_encoder = json.load(open(data_dir + 'mortality.json'))
     user_tags = dict()
-    with open(data_dir+data_name + '.json') as dfile:
+    with open(data_dir + data_name + '.json') as dfile:
         for line in dfile:
             user_info = json.loads(line)
             raw_uid = user_info['uid']
@@ -193,13 +193,12 @@ def user_mortality_viz(data_name, method_name):
 
 
 if __name__ == '__main__':
-    # quant_path = '../resources/analyze/quant.csv'
-    # for dname in ['Diabetes', 'MIMIC-III']:
-    #     analysis_viz(quant_path, dname)
+    quant_path = '../resources/analyze/quant.csv'
+    for dname in ['Diabetes', 'MIMIC-III']:
+        analysis_viz(quant_path, dname)
 
-    for dname in ['diabetes', 'mimic-iii']:
-        for method in ['caue_gru', 'user2vec', 'suisil2user']:
-            print('Current job {}, {}'.format(dname, method))
-            # user_viz_phenotype(dname, method)
-            user_mortality_viz(dname, method)
-
+    # for dname in ['diabetes', 'mimic-iii']:
+    #     for method in ['caue_gru']:  # , 'user2vec', 'suisil2user'
+    #         print('Current job {}, {}'.format(dname, method))
+    #         user_viz_phenotype(dname, method)
+    #         user_mortality_viz(dname, method)

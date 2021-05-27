@@ -315,7 +315,7 @@ def mortality_eval(params):
         predicts = lr.predict(x_test)
         results['precision'].append(metrics.precision_score(y_pred=predicts, y_true=y_test))
         results['recall'].append(metrics.recall_score(y_pred=predicts, y_true=y_test))
-        results['f1-score'].append(metrics.f1_score(y_pred=predicts, y_true=y_test, average='weighted'))
+        results['f1-score'].append(metrics.f1_score(y_pred=predicts, y_true=y_test, average='macro'))
 
     # clustering
     cluster = SpectralClustering(n_clusters=2, n_jobs=-1)

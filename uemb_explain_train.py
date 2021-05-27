@@ -677,7 +677,7 @@ if __name__ == '__main__':
         'user_emb_train': True,
         'concept_emb_path': odir + '{}_concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
-        'concept_task_weight': .03 if args.use_concept else 0,
+        'concept_task_weight': .3 if args.use_concept else 0,
         'epochs': 15,
         'optimizer': 'adam',
         'lr': args.lr,

@@ -951,7 +951,6 @@ def process_diabetes(indir, odir):
         os.mkdir(os.environ['CONCEPT_ODIR'])
 
     # load tokenizers and concept extractor
-    # mm = MetaMap.get_instance('/data/xiaolei/public_mm/bin/metamap')
 
     # extract age information
     user_age = dict()
@@ -1029,7 +1028,6 @@ def get_concept_thread(input_text):
 
     concepts_collection = []
     mm = MetaMap.get_instance(os.environ['METAMAP_HOME'])
-    # mm = MetaMapLite.get_instance('/data/xiaolei/public_mm_lite/')
 
     for step in tqdm(range(steps)):
         step_collection = collection[step * step_size: (step + 1) * step_size]

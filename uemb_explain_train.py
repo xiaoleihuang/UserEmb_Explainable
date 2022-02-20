@@ -29,18 +29,19 @@ def split_docs(doc, max_len=512):
     """
     if type(doc) == str:
         doc = doc.split()
-    max_len -= 2  # for the two special tokens, start and end
+    rand_max_len = np.random.randint(200, high=max_len)
+    rand_max_len -= 2  # for the two special tokens, start and end
 
     docs = []
-    steps = len(doc) // max_len
-    if len(doc) % max_len != 0:
+    steps = len(doc) // rand_max_len
+    if len(doc) % rand_max_len != 0:
         steps += 1
 
     for idx in range(steps):
-        if idx == steps - 1 and len(doc[idx: max_len * (idx + 1)]) < max_len:
-            docs.append(' '.join(doc[max_len * -1:]))  # to fill the last piece with full length
+        if idx == steps - 1 and len(doc[idx: rand_max_len * (idx + 1)]) < rand_max_len:
+            docs.append(' '.join(doc[rand_max_len * -1:]))  # to fill the last piece with full length
         else:
-            docs.append(' '.join(doc[max_len * idx: max_len * (idx + 1)]))
+            docs.append(' '.join(doc[rand_max_len * idx: rand_max_len * (idx + 1)]))
 
     return docs
 
@@ -287,9 +288,26 @@ def user_doc_builder(user_docs, all_docs, params):
 
         for step, doc_idx in enumerate(user_docs[uid]['docs']):
             # documents
-            docs.append(all_docs[doc_idx])
-            ud_labels.append(1)
-            uids_docs.append(user_encoder[uid])
+            if np.random.random() < 0.2:
+                # contrastive samples
+                contrastive_sample = all_docs[doc_idx]
+                for item_idx in range(1, len(contrastive_sample)-1):
+                    if np.random.random() < 0.15:
+                        if params['method'] == 'caue_gru':
+                            contrastive_sample[item_idx] = np.random.choice(
+                                list(range(2, tokenizer.num_words)), size=1,
+                            )
+                        else:
+                            contrastive_sample[item_idx] = np.random.choice(
+                                list(range(2, tokenizer.model_max_length)), size=1,
+                            )
+                docs.append(contrastive_sample)
+                ud_labels.append(0)
+                uids_docs.append(user_encoder[uid])
+            else:
+                docs.append(all_docs[doc_idx])
+                ud_labels.append(1)
+                uids_docs.append(user_encoder[uid])
 
             # concepts
             if len(user_docs[uid]['concepts'][step]) == 0:
@@ -700,5 +718,6 @@ if __name__ == '__main__':
         'concept_sample_size': 33,  # to sample the number per document for training, prevent too many
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
+        'use_mlm': False,
     }
     main(parameters)

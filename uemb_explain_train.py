@@ -661,6 +661,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)
     parser.add_argument('--device', type=str, help='cpu or cuda')
+    parser.add_argument('--c_ratio', type=float, help='Contrative ratio', default=0.2)
     args = parser.parse_args()
 
     if args.method not in ['caue_gru', 'caue_bert']:
@@ -673,9 +674,9 @@ if __name__ == '__main__':
         os.mkdir(odir)
 
     if args.use_concept:
-        odir = odir + '{}/'.format(args.method)
+        odir = odir + '{}_{}/'.format(args.method, args.c_ratio)
     else:
-        odir = odir + '{}_no/'.format(args.method)
+        odir = odir + '{}_{}_no/'.format(args.method, args.c_ratio)
     if not os.path.exists(odir):
         os.mkdir(odir)
 

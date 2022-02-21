@@ -106,7 +106,7 @@ def build_concept_weights(params):
         tokens = concept.split()
         vector = [w2v_model[token] for token in tokens if token in w2v_model]
         if len(vector) > 1:
-            emb_model[idx] = np.mean(vector, axis=0)
+            emb_model[idx] = np.average(vector, axis=0)
         elif len(vector) == 1:
             emb_model[idx] = vector[0]
             del concept_tkn[concept]
@@ -287,12 +287,16 @@ def user_doc_builder(user_docs, all_docs, params):
         sample_concept_space = [key for key in concept_tkn if key not in user_concepts]
 
         for step, doc_idx in enumerate(user_docs[uid]['docs']):
+            if len(user_docs[uid]['concepts'][step]) == 0:
+                continue
+
+            contrastive_ratio = np.random.random()
             # documents
-            if np.random.random() < 0.2:
-                # contrastive samples
+            if contrastive_ratio < .2:
+                # contrastive samples on token level
                 contrastive_sample = all_docs[doc_idx]
                 for item_idx in range(1, len(contrastive_sample)-1):
-                    if np.random.random() < 0.15:
+                    if np.random.random() < params['contrastive_ratio']:
                         if params['method'] == 'caue_gru':
                             contrastive_sample[item_idx] = np.random.choice(
                                 list(range(2, tokenizer.num_words)), size=1,
@@ -302,7 +306,10 @@ def user_doc_builder(user_docs, all_docs, params):
                                 list(range(2, tokenizer.model_max_length)), size=1,
                             )
                 docs.append(contrastive_sample)
-                ud_labels.append(0)
+                if params['contrastive_ratio'] > 0:
+                    ud_labels.append(0)
+                else:
+                    ud_labels.append(1)
                 uids_docs.append(user_encoder[uid])
             else:
                 docs.append(all_docs[doc_idx])
@@ -310,9 +317,6 @@ def user_doc_builder(user_docs, all_docs, params):
                 uids_docs.append(user_encoder[uid])
 
             # concepts
-            if len(user_docs[uid]['concepts'][step]) == 0:
-                continue
-
             user_docs[uid]['concepts'][step] = [
                 concept for concept in user_docs[uid]['concepts'][step] if concept in concept_tkn]
             if len(user_docs[uid]['concepts'][step]) > params['concept_sample_size']:
@@ -705,7 +709,7 @@ if __name__ == '__main__':
         # 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12'
         # 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'
         # '/data/models/mimiciii_roberta_10e_128b'
-        'bert_name': 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12',
+        'bert_name': 'emilyalsentzer/Bio_ClinicalBERT',
         'decay_rate': .9,
         'warm_steps': 33,
         'bidirectional': True,
@@ -719,5 +723,6 @@ if __name__ == '__main__':
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
         'use_mlm': False,
+        'contrastive_ratio': .2,
     }
     main(parameters)

@@ -14,13 +14,19 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 #         if (idx + 1) % 2 == 0:
 #             process.communicate()
 
-for dname in ['diabetes', 'mimic-iii']:  # 'diabetes', 'mimic-iii'
+for dname in ['diabetes']:  # 'diabetes', 'mimic-iii'
+    #methods = [
+    #    'lda2user_concept', 'doc2user_concept',
+    #    'word2user_concept',  'user2vec_concept',
+    #]
     methods = [
-        'lda2user_concept', 'doc2user_concept',
-        'word2user_concept',  'user2vec_concept',
+        'caue_bert_0.0', 'caue_bert_0.0_no', 'caue_bert_0.33',
+        'caue_bert_0.33_no', 'caue_gru_0.0', 'caue_gru_0.0_no',
+        'caue_gru_0.33', 'caue_gru_0.33_no'
     ]
     for idx, model in enumerate(methods):
-        job_str = 'python evaluator.py --dname {} --model {}'.format(dname, model)
-        process = subprocess.Popen(job_str, shell=True)
-        if (idx + 1) % 2 == 0:
-            process.communicate()
+        for epoch in range(15):
+            job_str = 'python evaluator.py --dname {} --model {} --epoch {}'.format(dname, model, epoch)
+            process = subprocess.Popen(job_str, shell=True)
+            if (idx + 1) % 2 == 0:
+                process.communicate()

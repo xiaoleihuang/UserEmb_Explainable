@@ -250,11 +250,13 @@ def user_doc_builder(user_docs, all_docs, params):
     concept_tkn = pickle.load(open(params['concept_tkn_path'], 'rb'))
     params['concept_size'] = len(concept_tkn)
     user_encoder = json.load(open(params['user_stats_path']))
+    vocabs = None
 
     if params['method'] == 'caue_gru':
         tokenizer = pickle.load(open(params['word_tkn_path'], 'rb'))
     else:
         tokenizer = BertTokenizer.from_pretrained(params['bert_name'])
+        vocabs = [item[1] for item in tokenizer.get_vocab().items()]
 
     if params['method'] == 'caue_gru':
         # GRU tokenizer
@@ -279,6 +281,7 @@ def user_doc_builder(user_docs, all_docs, params):
     concepts = []
     ud_labels = []
     uc_labels = []
+    vocabs
 
     # loop through each user
     for uid in process:
@@ -292,18 +295,18 @@ def user_doc_builder(user_docs, all_docs, params):
 
             contrastive_ratio = np.random.random()
             # documents
-            if contrastive_ratio < .2:
+            if params['contrastive_ratio'] > 0 and contrastive_ratio < .2:
                 # contrastive samples on token level
                 contrastive_sample = all_docs[doc_idx]
                 for item_idx in range(1, len(contrastive_sample)-1):
                     if np.random.random() < params['contrastive_ratio']:
                         if params['method'] == 'caue_gru':
-                            contrastive_sample[item_idx] = np.random.choice(
-                                list(range(2, tokenizer.num_words)), size=1,
+                            contrastive_sample[item_idx] = torch.IntTensor(
+                                np.random.choice(list(range(2, tokenizer.num_words)), size=1,)
                             )
                         else:
-                            contrastive_sample[item_idx] = np.random.choice(
-                                list(range(2, tokenizer.model_max_length)), size=1,
+                            contrastive_sample[item_idx] = torch.IntTensor(
+                                np.random.choice(vocabs, size=1)
                             )
                 docs.append(contrastive_sample)
                 if params['contrastive_ratio'] > 0:
@@ -458,7 +461,8 @@ def main(params):
                 {'params': [p for n, p in caue_model.named_parameters() if 'bert_model' in n or (not p.requires_grad)],
                  'weight_decay_rate': 0.0}
             ]
-            optimizer = AdamW(optimize_parameters, lr=params['lr'])
+            #optimizer = AdamW(optimize_parameters, lr=params['lr'])
+            optimizer = AdamW(caue_model.parameters(), lr=params['lr'])
             scheduler = get_linear_schedule_with_warmup(
                 optimizer, num_warmup_steps=params['warm_steps'],
                 num_training_steps=(len(ud_labels) // params['batch_size'] + 1)*params['epochs']
@@ -656,7 +660,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_concept', type=str2bool, help='If use concept as additional features')
     parser.add_argument('--use_keras', type=bool, help='If use keras implementation for the GRU method', default=False)
     parser.add_argument('--lr', type=float, help='Learning rate', default=3e-4)
-    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=3)
+    parser.add_argument('--ng_num', type=int, help='Number of negative samples', default=2)
     parser.add_argument('--batch_size', type=int, help='Batch size', default=32)
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)
@@ -724,6 +728,6 @@ if __name__ == '__main__':
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
         'use_mlm': False,
-        'contrastive_ratio': .2,
+        'contrastive_ratio': args.c_ratio,
     }
     main(parameters)

@@ -51,8 +51,8 @@ def data_loader(params):
             }
 
     # load the user embeddings, default to load the user.npy
-    if os.path.exists(params['emb_dir'] + 'user{}.npy'.format(params['epoch'])):
-        uembs = np.load(params['emb_dir'] + 'user{}.npy'.format(params['epoch']))
+    if os.path.exists(params['emb_dir'] + 'user_{}.npy'.format(params['epoch'])):
+        uembs = np.load(params['emb_dir'] + 'user_{}.npy'.format(params['epoch']))
     elif os.path.exists(params['emb_dir'] + 'user.txt'):
         # this assumes using .txt file
         uembs = [[]] * len(user_tags)
@@ -390,18 +390,18 @@ if __name__ == '__main__':
     if not os.path.exists(parameters['odir']):
         os.mkdir(parameters['odir'])
 
-    #print('Regression Evaluation: ')
-    #regression(parameters)
-    #print()
-    #
-    #print('Classification Evaluation: ')
-    #classification(parameters)
-    #print()
-    #
-    #print('Retrieval Evaluation: ')
-    #retrieval(parameters)
-    #print()
-
-    print('MIMIC-III Mortality: ')
-    mortality_eval(parameters)
+    print('Regression Evaluation: ')
+    regression(parameters)
     print()
+    #
+    print('Classification Evaluation: ')
+    classification(parameters)
+    print()
+    #
+    print('Retrieval Evaluation: ')
+    retrieval(parameters)
+    print()
+
+    #print('MIMIC-III Mortality: ')
+    #mortality_eval(parameters)
+    #print()

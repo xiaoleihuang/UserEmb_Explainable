@@ -77,7 +77,7 @@ class Lda2User(object):
         self.ae_path = kwargs['ae_path']
         self.device = kwargs['device']
 
-        self.ae = AE(self.model.num_topics, 300)  # default value in paper
+        self.ae = AE(self.model.num_topics, 500)  # default value in paper
         if not os.path.exists(self.ae_path):
             self.train_autoencoder()
         else:

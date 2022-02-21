@@ -11,9 +11,11 @@ from scipy.spatial import distance
 from sklearn import metrics
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import SpectralClustering
 import keras
 from tqdm import tqdm
+
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # for cpu usage
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
@@ -49,8 +51,8 @@ def data_loader(params):
             }
 
     # load the user embeddings, default to load the user.npy
-    if os.path.exists(params['emb_dir'] + 'user.npy'):
-        uembs = np.load(params['emb_dir'] + 'user.npy')
+    if os.path.exists(params['emb_dir'] + 'user{}.npy'.format(params['epoch'])):
+        uembs = np.load(params['emb_dir'] + 'user{}.npy'.format(params['epoch']))
     elif os.path.exists(params['emb_dir'] + 'user.txt'):
         # this assumes using .txt file
         uembs = [[]] * len(user_tags)
@@ -62,7 +64,8 @@ def data_loader(params):
                 uid = user_encoder[line[0]]
                 uembs[uid] = [float(item) for item in line[1].split()]
     else:
-        uembs = np.load(params['emb_dir'] + 'user_2.npy')
+        raise ValueError('Not support!')
+        # uembs = np.load(params['emb_dir'] + 'user_9.npy')
     return uembs, user_tags, tag_encoder, user_encoder
 
 
@@ -82,6 +85,7 @@ def regression(params):
     uids = list(user_tags.keys())
     for idx in tqdm(range(len(user_tags))):
         # for jdx in tqdm(range(idx, len(user_tags))):
+        np.random.seed(idx)  # for reproduction purposes
         jdx = np.random.choice(list(range(len(user_tags))))
         idx_uid = uids[idx]
         jdx_uid = uids[jdx]
@@ -298,6 +302,17 @@ def mortality_eval(params):
     data_x = np.asarray(data_x)
     data_y = np.asarray(data_y)
 
+    # balance dataset
+    counts = Counter(data_y).most_common()
+    print(counts)
+    large_label = counts[0][0]
+    small_num = counts[-1][1]
+    large_indices = [idx for idx, item_y in enumerate(data_y) if item_y == large_label]
+    large_indices = list(np.random.choice(large_indices, size=small_num, replace=False))
+    large_indices.extend([idx for idx, item_y in enumerate(data_y) if item_y != large_label])
+    data_y = np.asarray([data_y[idx] for idx in large_indices])
+    data_x = np.asarray([data_x[idx] for idx in large_indices])
+
     # five folds cross evaluation
     # split into train/test, k-folds cross validation
     kf = KFold(n_splits=5, shuffle=True)
@@ -310,12 +325,12 @@ def mortality_eval(params):
     for train_idx, test_idx in tqdm(kf.split(data_y), total=5):
         x_train, x_test = data_x[train_idx], data_x[test_idx]
         y_train, y_test = data_y[train_idx], data_y[test_idx]
-        lr = LogisticRegression(class_weight='balanced', n_jobs=-1, max_iter=1000)
+        lr = LogisticRegression(class_weight='balanced', C=0.01, penalty='l2', n_jobs=-1)
         lr.fit(X=x_train, y=y_train)
         predicts = lr.predict(x_test)
         results['precision'].append(metrics.precision_score(y_pred=predicts, y_true=y_test))
         results['recall'].append(metrics.recall_score(y_pred=predicts, y_true=y_test))
-        results['f1-score'].append(metrics.f1_score(y_pred=predicts, y_true=y_test, average='weighted'))
+        results['f1-score'].append(metrics.f1_score(y_pred=predicts, y_true=y_test, average='macro'))
 
     # clustering
     cluster = SpectralClustering(n_clusters=2, n_jobs=-1)
@@ -356,6 +371,7 @@ if __name__ == '__main__':
     args.add_argument('--model', type=str, help='user embedding model')
     args.add_argument('--sim_method', type=str, default='cosine')
     args.add_argument('--top_tags', type=int, default=50)
+    args.add_argument('--epoch', type=str, default='')
     args = args.parse_args()
 
     # categories of data names
@@ -368,22 +384,23 @@ if __name__ == '__main__':
         'odir': './resources/eval/',
         'eval_time': datetime.datetime.now().strftime('%H:%M:%S %m-%d-%Y'),
         'sim_method': args.sim_method,
-        'top_tags': args.top_tags
+        'top_tags': args.top_tags,
+        'epoch': args.epoch
     }
     if not os.path.exists(parameters['odir']):
         os.mkdir(parameters['odir'])
 
-    print('Regression Evaluation: ')
-    regression(parameters)
-    print()
-
-    print('Classification Evaluation: ')
-    classification(parameters)
-    print()
-
-    print('Retrieval Evaluation: ')
-    retrieval(parameters)
-    print()
+    #print('Regression Evaluation: ')
+    #regression(parameters)
+    #print()
+    #
+    #print('Classification Evaluation: ')
+    #classification(parameters)
+    #print()
+    #
+    #print('Retrieval Evaluation: ')
+    #retrieval(parameters)
+    #print()
 
     print('MIMIC-III Mortality: ')
     mortality_eval(parameters)

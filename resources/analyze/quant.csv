@@ -1,6 +1,6 @@
 data,f1-score,feature
-Diabetes,0.788,concept
 Diabetes,0.784,n-gram
+Diabetes,0.788,concept
 Diabetes,0.794,n-gram+concept
 MIMIC-III,0.815,n-gram
 MIMIC-III,0.813,concept

@@ -88,7 +88,7 @@ class Lda2User(object):
         user_features = TensorDataset(torch.FloatTensor(user_features))
         user_features = DataLoader(user_features, batch_size=32, shuffle=True)
 
-        optimizer = torch.optim.Adam(self.ae.parameters(), lr=.001)
+        optimizer = torch.optim.SGD(self.ae.parameters(), lr=.001)
         criterion = torch.nn.BCELoss().to(self.device)
         self.ae.train()
 

@@ -29,18 +29,19 @@ def split_docs(doc, max_len=512):
     """
     if type(doc) == str:
         doc = doc.split()
-    max_len -= 2  # for the two special tokens, start and end
+    rand_max_len = np.random.randint(200, high=max_len)
+    rand_max_len -= 2  # for the two special tokens, start and end
 
     docs = []
-    steps = len(doc) // max_len
-    if len(doc) % max_len != 0:
+    steps = len(doc) // rand_max_len
+    if len(doc) % rand_max_len != 0:
         steps += 1
 
     for idx in range(steps):
-        if idx == steps - 1 and len(doc[idx: max_len * (idx + 1)]) < max_len:
-            docs.append(' '.join(doc[max_len * -1:]))  # to fill the last piece with full length
+        if idx == steps - 1 and len(doc[idx: rand_max_len * (idx + 1)]) < rand_max_len:
+            docs.append(' '.join(doc[rand_max_len * -1:]))  # to fill the last piece with full length
         else:
-            docs.append(' '.join(doc[max_len * idx: max_len * (idx + 1)]))
+            docs.append(' '.join(doc[rand_max_len * idx: rand_max_len * (idx + 1)]))
 
     return docs
 
@@ -105,7 +106,7 @@ def build_concept_weights(params):
         tokens = concept.split()
         vector = [w2v_model[token] for token in tokens if token in w2v_model]
         if len(vector) > 1:
-            emb_model[idx] = np.mean(vector, axis=0)
+            emb_model[idx] = np.average(vector, axis=0)
         elif len(vector) == 1:
             emb_model[idx] = vector[0]
             del concept_tkn[concept]
@@ -286,15 +287,36 @@ def user_doc_builder(user_docs, all_docs, params):
         sample_concept_space = [key for key in concept_tkn if key not in user_concepts]
 
         for step, doc_idx in enumerate(user_docs[uid]['docs']):
-            # documents
-            docs.append(all_docs[doc_idx])
-            ud_labels.append(1)
-            uids_docs.append(user_encoder[uid])
-
-            # concepts
             if len(user_docs[uid]['concepts'][step]) == 0:
                 continue
 
+            contrastive_ratio = np.random.random()
+            # documents
+            if contrastive_ratio < .2:
+                # contrastive samples on token level
+                contrastive_sample = all_docs[doc_idx]
+                for item_idx in range(1, len(contrastive_sample)-1):
+                    if np.random.random() < params['contrastive_ratio']:
+                        if params['method'] == 'caue_gru':
+                            contrastive_sample[item_idx] = np.random.choice(
+                                list(range(2, tokenizer.num_words)), size=1,
+                            )
+                        else:
+                            contrastive_sample[item_idx] = np.random.choice(
+                                list(range(2, tokenizer.model_max_length)), size=1,
+                            )
+                docs.append(contrastive_sample)
+                if params['contrastive_ratio'] > 0:
+                    ud_labels.append(0)
+                else:
+                    ud_labels.append(1)
+                uids_docs.append(user_encoder[uid])
+            else:
+                docs.append(all_docs[doc_idx])
+                ud_labels.append(1)
+                uids_docs.append(user_encoder[uid])
+
+            # concepts
             user_docs[uid]['concepts'][step] = [
                 concept for concept in user_docs[uid]['concepts'][step] if concept in concept_tkn]
             if len(user_docs[uid]['concepts'][step]) > params['concept_sample_size']:
@@ -677,7 +699,7 @@ if __name__ == '__main__':
         'user_emb_train': True,
         'concept_emb_path': odir + '{}_concept_emb.npy'.format(args.dname),
         'doc_task_weight': 1,
-        'concept_task_weight': .03 if args.use_concept else 0,
+        'concept_task_weight': .3 if args.use_concept else 0,
         'epochs': 15,
         'optimizer': 'adam',
         'lr': args.lr,
@@ -687,7 +709,7 @@ if __name__ == '__main__':
         # 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12'
         # 'bionlp/bluebert_pubmed_uncased_L-12_H-768_A-12'
         # '/data/models/mimiciii_roberta_10e_128b'
-        'bert_name': 'bionlp/bluebert_pubmed_mimic_uncased_L-12_H-768_A-12',
+        'bert_name': 'emilyalsentzer/Bio_ClinicalBERT',
         'decay_rate': .9,
         'warm_steps': 33,
         'bidirectional': True,
@@ -700,5 +722,7 @@ if __name__ == '__main__':
         'concept_sample_size': 33,  # to sample the number per document for training, prevent too many
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
+        'use_mlm': False,
+        'contrastive_ratio': .2,
     }
     main(parameters)

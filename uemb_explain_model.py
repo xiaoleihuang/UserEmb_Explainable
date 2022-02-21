@@ -4,6 +4,7 @@ import keras
 import torch
 import torch.nn as nn
 from transformers import AutoModel
+from transformers.models.bert.modeling_bert import BertLMPredictionHead
 import numpy as np
 
 
@@ -254,6 +255,8 @@ class CAUEBert(nn.Module):
         self.linear = nn.Linear(
             self.bert_model.config.hidden_size, self.params['emb_dim'])
         self.cos = nn.CosineSimilarity(dim=-1)
+        if 'use_mlm' in self.params and self.params['use_mlm']:
+            self.cls = BertLMPredictionHead(self.bert_model.config)
 
     def forward(self, **kwargs):
         input_doc_ids = kwargs['input_doc_ids']
@@ -272,4 +275,9 @@ class CAUEBert(nn.Module):
 
         user_doc_sims = torch.sum(users4doc * doc_embs, -1)
         user_concept_sims = torch.sum(users4concept * concept_embs, -1)
-        return user_doc_sims, user_concept_sims
+
+        if 'use_mlm' in self.params and self.params['use_mlm']:
+            mlm_scores = self.cls(doc_bert_embs[0]).view(-1, self.bert_model.config.vocab_size)
+            return user_doc_sims, user_concept_sims, mlm_scores
+        else:
+            return user_doc_sims, user_concept_sims

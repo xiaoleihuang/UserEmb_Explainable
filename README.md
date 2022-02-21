@@ -2,6 +2,8 @@
 
 # Model Diagram
 
+![model_diagram](images/model_diagram.png)
+
 # Runtime Platform
 
 * OS: Ubuntu 20.04
@@ -40,6 +42,10 @@ This will ensure you follow basic ethic rules to use the datasets. The datasets 
 # Data Analysis
 Data analysis scripts will be under the folder of `data`. 
 We probe data via two types of analysis aspects, records and concepts.
+
+Diabetes Analysis             |  Mimic-III Analysis
+:-------------------------:|:-------------------------:
+![diabetes_quant](images/diabetes_quant.png)  |  ![mimic-iii_quant](images/mimic-iii_quant.png)
 
 # Experimental Steps
 

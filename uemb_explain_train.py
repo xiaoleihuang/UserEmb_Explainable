@@ -293,8 +293,10 @@ def user_doc_builder(user_docs, all_docs, params):
             contrastive_ratio = np.random.random()
             # documents
             if contrastive_ratio < .2:
-                # contrastive samples on token level
                 contrastive_sample = all_docs[doc_idx]
+
+                # contrastive samples on token level
+                # if params['contrastive_level'] == 'token':
                 for item_idx in range(1, len(contrastive_sample)-1):
                     if np.random.random() < params['contrastive_ratio']:
                         if params['method'] == 'caue_gru':
@@ -305,6 +307,7 @@ def user_doc_builder(user_docs, all_docs, params):
                             contrastive_sample[item_idx] = np.random.choice(
                                 list(range(2, tokenizer.model_max_length)), size=1,
                             )
+                # else:
                 docs.append(contrastive_sample)
                 if params['contrastive_ratio'] > 0:
                     ud_labels.append(0)
@@ -354,7 +357,7 @@ def user_doc_builder(user_docs, all_docs, params):
     else:
         concepts = [
             tokenizer.encode_plus(
-                concept, padding='max_length', max_length=5,
+                concept, padding='max_length', max_length=10,
                 return_tensors='pt', return_token_type_ids=False,
                 truncation=True,
             )['input_ids'][0] for concept in concepts
@@ -661,7 +664,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len', type=int, help='Max length', default=512)
     parser.add_argument('--emb_dim', type=int, help='Embedding dimensions', default=300)
     parser.add_argument('--device', type=str, help='cpu or cuda')
-    parser.add_argument('--c_ratio', type=float, help='Contrative ratio', default=0.2)
+    parser.add_argument('--c_ratio', type=float, help='Contrastive ratio', default=0.2)
     args = parser.parse_args()
 
     if args.method not in ['caue_gru', 'caue_bert']:
@@ -723,7 +726,7 @@ if __name__ == '__main__':
         'concept_sample_size': 33,  # to sample the number per document for training, prevent too many
         'use_concept': args.use_concept,
         'use_keras': args.use_keras,
-        'use_mlm': False,
+        'use_mlm': .003,  # False or give a value
         'contrastive_ratio': .2,
     }
     main(parameters)

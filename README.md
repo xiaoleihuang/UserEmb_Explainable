@@ -73,10 +73,21 @@ Diabetes Analysis             |  Mimic-III Analysis
 
 # Contact
 
-Anonymized Version~ 
+Xiaolei Huang, **xiaolei.huang@memphis.edu**
 
 
 # Citation
-
-Anonymized Version~
-
+```
+@inproceedings{huang2022enriching,
+    author = {Huang, Xiaolei and Dernoncourt, Franck and Dredze, Mark},
+    title = {Enriching Unsupervised User Embedding via Medical Concepts},
+    year = {2022},
+    publisher = {Association for Computing Machinery},
+    address = {New York, NY, USA},
+    booktitle = {Proceedings of the Conference on Health, Inference, and Learning},
+    pages = {1–16},
+    keywords = {Electronic Health Records, Natural Language Processing, Patient Generated Health Data, Representation Learning, Unsupervised Learning},
+    location = {Virtual Event, USA},
+    series = {CHIL '22}
+}
+```

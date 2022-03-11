@@ -11,7 +11,6 @@ from scipy.spatial import distance
 from sklearn import metrics
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import SpectralClustering
 import keras
 from tqdm import tqdm
@@ -207,9 +206,9 @@ def classification(params):
 
     # average the scores
     # results['accuracy'] = np.mean(results['accuracy'])
-    results['precision'] = np.mean(results['precision'])
-    results['recall'] = np.mean(results['recall'])
-    results['f1-score'] = np.mean(results['f1-score'])
+    results['precision'] = np.average(results['precision'])
+    results['recall'] = np.average(results['recall'])
+    results['f1-score'] = np.average(results['f1-score'])
 
     results = json.dumps(results, indent=4)
     print(results)
@@ -231,9 +230,6 @@ def retrieval(params):
     }
 
     select_num = 10
-    # random_seed = 33
-    # np.random.seed(random_seed)
-    # uids = np.random.choice(uids, size=select_num, replace=False)
 
     for uid in uids:
         similar_users = np.dot(uembs, uembs[uid].T)
@@ -260,8 +256,8 @@ def retrieval(params):
             )
             results['tags_set'].append(len(shared_tags) / len(union_tags))
 
-    results['tags'] = np.mean(results['tags'])
-    results['tags_set'] = np.mean(results['tags_set'])
+    results['tags'] = np.average(results['tags'])
+    results['tags_set'] = np.average(results['tags_set'])
 
     results = json.dumps(results, indent=4)
     print(results)
@@ -352,9 +348,9 @@ def mortality_eval(params):
                 else:
                     predicts.append(1)
     results['clustering'] = metrics.f1_score(y_pred=predicts, y_true=y_test, average='weighted')
-    results['f1-score'] = np.mean(results['f1-score'])
-    results['precision'] = np.mean(results['precision'])
-    results['recall'] = np.mean(results['recall'])
+    results['f1-score'] = np.average(results['f1-score'])
+    results['precision'] = np.average(results['precision'])
+    results['recall'] = np.average(results['recall'])
     results = json.dumps(results, indent=4)
     print(results)
 
@@ -390,17 +386,18 @@ if __name__ == '__main__':
     if not os.path.exists(parameters['odir']):
         os.mkdir(parameters['odir'])
 
-    #print('Regression Evaluation: ')
-    #regression(parameters)
-    #print()
+    # comment out any tasks based your needs
+    print('Regression Evaluation: ')
+    regression(parameters)
+    print()
     #
-    #print('Classification Evaluation: ')
-    #classification(parameters)
-    #print()
+    print('Classification Evaluation: ')
+    classification(parameters)
+    print()
     #
-    #print('Retrieval Evaluation: ')
-    #retrieval(parameters)
-    #print()
+    print('Retrieval Evaluation: ')
+    retrieval(parameters)
+    print()
 
     print('MIMIC-III Mortality: ')
     mortality_eval(parameters)

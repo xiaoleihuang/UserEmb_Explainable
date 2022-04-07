@@ -78,16 +78,19 @@ Xiaolei Huang, **xiaolei.huang@memphis.edu**
 
 # Citation
 ```
-@inproceedings{huang2022enriching,
-    author = {Huang, Xiaolei and Dernoncourt, Franck and Dredze, Mark},
-    title = {Enriching Unsupervised User Embedding via Medical Concepts},
-    year = {2022},
-    publisher = {Association for Computing Machinery},
-    address = {New York, NY, USA},
-    booktitle = {Proceedings of the Conference on Health, Inference, and Learning},
-    pages = {1–16},
-    keywords = {Electronic Health Records, Natural Language Processing, Patient Generated Health Data, Representation Learning, Unsupervised Learning},
-    location = {Virtual Event, USA},
-    series = {CHIL '22}
+@InProceedings{pmlr-v174-huang22a,
+  title = {Enriching Unsupervised User Embedding via Medical Concepts},
+  author = {Huang, Xiaolei and Dernoncourt, Franck and Dredze, Mark},
+  booktitle = {Proceedings of the Conference on Health, Inference, and Learning},
+  pages = {63--78},
+  year = {2022},
+  editor = {Flores, Gerardo and Chen, George H and Pollard, Tom and Ho, Joyce C and Naumann, Tristan},
+  volume = {174},
+  series = {Proceedings of Machine Learning Research},
+  month = {07--08 Apr},
+  publisher =    {PMLR},
+  pdf = {https://proceedings.mlr.press/v174/huang22a/huang22a.pdf},
+  url = {https://proceedings.mlr.press/v174/huang22a.html},
+  abstract = {Clinical notes in Electronic Health Records (EHR) present rich documented information of patients to inference phenotype for disease diagnosis and study patient characteristics for cohort selection. Unsupervised user embedding aims to encode patients into fixed-length vectors without human supervisions. Medical concepts extracted from the clinical notes contain rich connections between patients and their clinical categories. However, existing \textit{unsupervised} approaches of user embeddings from clinical notes do not explicitly incorporate medical concepts. In this study, we propose a concept-aware unsupervised user embedding that jointly leverages text documents and medical concepts from two clinical corpora, MIMIC-III and Diabetes. We evaluate user embeddings on both extrinsic and intrinsic tasks, including phenotype classification, in-hospital mortality prediction, patient retrieval, and patient relatedness. Experiments on the two clinical corpora show our approach exceeds unsupervised baselines, and incorporating medical concepts can significantly improve the baseline performance.}
 }
 ```
